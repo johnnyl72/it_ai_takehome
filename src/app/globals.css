@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/*
+ * Two voices: Public Sans is the tool talking; Source Serif is anything
+ * quoted from the label or the application. Status is always icon + word +
+ * colour, never colour alone.
+ */
+@theme {
+  --font-sans: var(--font-public-sans), system-ui, sans-serif;
+  --font-serif: var(--font-source-serif), Georgia, serif;
+
+  --color-ink: #1b1b1b;
+  --color-muted: #50565e;
+  --color-line: #c9ccd0;
+  --color-line-soft: #e4e6e8;
+  --color-page: #f1f3f5;
+  --color-navy: #162e51;
+  --color-blue: #005ea2;
+  --color-blue-dark: #1a4480;
+  --color-blue-soft: #e8f1fa;
+
+  --color-pass: #1f6b1e;
+  --color-pass-soft: #e7f3e6;
+  --color-review: #765200;
+  --color-review-soft: #fdf1c9;
+  --color-fail: #b3150b;
+  --color-fail-soft: #fbe5e2;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  /* Larger than the browser default on purpose: half the team is over 50. */
+  font-size: 112.5%;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 3px solid #2491ff;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
