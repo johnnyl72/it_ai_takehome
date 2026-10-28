@@ -1,5 +1,7 @@
 # Label Check
 
+**Try it: [itaitakehome.vercel.app](https://itaitakehome.vercel.app).** Use "Try an example" or "Load the example batch" to test without your own labels.
+
 ![How a label is checked: the agent's browser loads the image, Tesseract OCR reads it, and plain rules decide](docs/label_check_flow.png)
 
 *Top lane: what the agent does. Middle lane: how the label is read. Bottom lane, read right to left: how each field and the government warning are judged. Diamonds are decisions; blue boxes explain why.*
