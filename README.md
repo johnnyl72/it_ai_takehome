@@ -1,5 +1,9 @@
 # Label Check
 
+![How a label is checked: the agent's browser loads the image, Tesseract OCR reads it, and plain rules decide](docs/label_check_flow.png)
+
+*Top lane: what the agent does. Middle lane: how the label is read. Bottom lane, read right to left: how each field and the government warning are judged. Diamonds are decisions; blue boxes explain why.*
+
 A prototype for TTB label compliance agents. Add a label image and what the COLA application says. The tool reads the label, compares each field, and checks the government warning word for word. It handles one label at a time or a batch of hundreds.
 
 Everything runs in the agent's browser with free, open-source OCR (Tesseract). There are no AI or cloud API calls, and images are never uploaded.
