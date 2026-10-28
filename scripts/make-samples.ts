@@ -1,11 +1,17 @@
 /**
- * Draws the test labels in src/lib/samples.ts into public/samples/*.jpg,
- * plus sample-batch.csv for the batch screen. Run: npm run samples
+ * Draws the test labels in src/lib/samples.ts into the test kit in
+ * public/test-kit/: the label images, applications.csv for the batch screen,
+ * and an answer key saying what each one should get. The examples on both
+ * screens load from here too. Run: npm run samples
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
+import Papa from "papaparse";
 import sharp from "sharp";
 import { applicationsToCsv } from "../src/lib/csv";
-import { SAMPLES, type Sample } from "../src/lib/samples";
+import { TEST_KIT, type KitEntry, type Sample } from "../src/lib/samples";
+
+const OUT = "public/test-kit";
+const SITE = "https://itaitakehome.vercel.app";
 
 const W = 1200;
 const H = 1600;
@@ -49,7 +55,9 @@ function labelSvg(s: Sample): string {
 
   // The warning: heading as its own tspan so it can be bold or not.
   const size = p.warningSize ?? 25;
-  const lines = wrap(`${p.warningHeading} ${p.warningBody}`, Math.floor((78 * 25) / size));
+  const lines = p.warningHeading
+    ? wrap(`${p.warningHeading} ${p.warningBody}`, Math.floor((78 * 25) / size))
+    : [];
   const boxTop = 1190;
   const pad = 24;
   const boxHeight = pad * 2 + size * 1.25 + (lines.length - 1) * size * 1.35;
@@ -76,7 +84,7 @@ function labelSvg(s: Sample): string {
   ${centered([p.net], 890, 46, `font-family="${SANS}" font-weight="bold" fill="${ink}"`)}
   ${centered(wrap(p.bottler, 52), 990, 30, `font-family="${SANS}" fill="${ink}"`)}
   ${p.country ? centered([p.country], 1110, 34, `font-family="${SANS}" font-weight="bold" fill="${accent}"`) : ""}
-  <rect x="90" y="${boxTop}" width="${W - 180}" height="${boxHeight}" fill="none" stroke="${ink}" stroke-width="2"/>
+  ${p.warningHeading ? `<rect x="90" y="${boxTop}" width="${W - 180}" height="${boxHeight}" fill="none" stroke="${ink}" stroke-width="2"/>` : ""}
   ${warning}
 </svg>`;
 }
@@ -119,19 +127,87 @@ async function photograph(label: Buffer): Promise<Buffer> {
     .toBuffer();
 }
 
-async function main() {
-  await mkdir("public/samples", { recursive: true });
-  for (const s of SAMPLES) {
-    let img: Buffer = await sharp(Buffer.from(labelSvg(s)))
-      .png()
-      .toBuffer();
-    img = s.photo ? await photograph(img) : await sharp(img).jpeg({ quality: 88 }).toBuffer();
-    await writeFile(`public/samples/${s.id}.jpg`, img);
-    console.log(`public/samples/${s.id}.jpg`);
+/** Out of focus, the way a hurried phone photo comes out. */
+async function blurry(label: Buffer): Promise<Buffer> {
+  return sharp(label).blur(BLUR).resize({ width: 1400 }).jpeg({ quality: 80 }).toBuffer();
+}
+
+/**
+ * Gaussian sigma in px on the 1200 px label. Lighter blur (2.5 to 4) still reads as a
+ * clear image but misreads a few words, which come out as Problems; 4.5 reads as poor.
+ */
+const BLUR = 4.5;
+
+async function draw(s: Sample): Promise<Buffer> {
+  const label = await sharp(Buffer.from(labelSvg(s)))
+    .png()
+    .toBuffer();
+  switch (s.capture) {
+    case "angled":
+      return photograph(label);
+    case "blurry":
+      return blurry(label);
+    case "thumbnail":
+      // Under the 600 px the app needs, so it's turned back before any reading.
+      return sharp(label).resize({ width: 400 }).jpeg({ quality: 88 }).toBuffer();
+    default:
+      return sharp(label).jpeg({ quality: 88 }).toBuffer();
   }
-  const csv = applicationsToCsv(SAMPLES.map((s) => ({ file: `${s.id}.jpg`, application: s.application })));
-  await writeFile("public/samples/sample-batch.csv", csv + "\n");
-  console.log("public/samples/sample-batch.csv");
+}
+
+const count = (r: string) => TEST_KIT.filter((e) => e.expected === r).length;
+
+function readme(): string {
+  const images = TEST_KIT.filter((e) => e.hasImage).length;
+  const rows = TEST_KIT.filter((e) => e.csvName).length;
+  return `Label Check test kit
+
+${images} fake label images and an applications.csv with ${rows} rows. Each label
+tests one rule. answer-key.csv says what each one should get and why.
+
+To check them all at once:
+1. Open ${SITE}/batch
+2. Drag the labels folder onto "Add the label images".
+3. Drag applications.csv onto "Add the application details".
+4. Before checking, the tool should report:
+   - ${images} images, ${images - 1} matched to an application (1 by name, ignoring a different
+     file extension), 1 with no application row, 1 exact copy of another.
+   - ${rows} applications, ${rows - 1} matched to an image, 1 with no image.
+5. Press "Check ${images} labels". When it finishes it should show:
+   ${count("Problem")} with problems, ${count("Review")} to review, ${count("Match")} matching, ${count("Couldn't check")} couldn't be checked,
+   ${count("Missing image")} missing an image.
+6. Press "Show details" on any row to see why. Compare with answer-key.csv.
+
+To check one label, open ${SITE}, add the image,
+and type in its row from applications.csv.
+
+All brands, companies and addresses are made up.
+`;
+}
+
+function answerKey(entries: KitEntry[]): string {
+  return Papa.unparse({
+    fields: ["file", "expected result", "what it tests", "what the result should say"],
+    data: entries.map((e) => [e.file, e.expected, e.tests, e.answer]),
+  });
+}
+
+async function main() {
+  await rm(OUT, { recursive: true, force: true });
+  await mkdir(`${OUT}/labels`, { recursive: true });
+  for (const e of TEST_KIT) {
+    if (!e.hasImage) continue;
+    if (e.copyOf) await copyFile(`${OUT}/labels/${e.copyOf}`, `${OUT}/labels/${e.file}`);
+    else await writeFile(`${OUT}/labels/${e.file}`, await draw(e.sample));
+    console.log(`${OUT}/labels/${e.file}`);
+  }
+  const csv = applicationsToCsv(
+    TEST_KIT.filter((e) => e.csvName).map((e) => ({ file: e.csvName!, application: e.sample.application })),
+  );
+  await writeFile(`${OUT}/applications.csv`, csv + "\n");
+  await writeFile(`${OUT}/answer-key.csv`, answerKey(TEST_KIT) + "\n");
+  await writeFile(`${OUT}/README.txt`, readme());
+  console.log(`${OUT}/applications.csv, answer-key.csv, README.txt`);
 }
 
 main().catch((e) => {

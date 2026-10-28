@@ -11,8 +11,8 @@
     "samples": "tsx scripts/make-samples.ts",
     "eval": "tsx scripts/eval-samples.ts",
     "load-batch": "tsx scripts/make-load-batch.ts",
-    "predev": "node scripts/copy-ocr-assets.mjs",
-    "prebuild": "node scripts/copy-ocr-assets.mjs"
+    "predev": "node scripts/copy-ocr-assets.mjs && node scripts/zip-test-kit.mjs",
+    "prebuild": "node scripts/copy-ocr-assets.mjs && node scripts/zip-test-kit.mjs"
   },
   "dependencies": {
     "@tesseract.js-data/eng": "^1.0.0",

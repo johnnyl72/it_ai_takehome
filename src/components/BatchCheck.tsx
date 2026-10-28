@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { checkLabel } from "@/lib/client/api";
+import { checkLabel, CheckError } from "@/lib/client/api";
 import { sha256 } from "@/lib/client/files";
 import { isImageFile } from "@/lib/client/image";
 import { readerCount } from "@/lib/client/ocr";
 import { objectUrl, releaseObjectUrl } from "@/lib/client/objectUrl";
 import { CSV_HEADERS, fileKey, parseApplicationsCsv, resultsToCsv, type ParsedCsv } from "@/lib/csv";
 import { reconcile } from "@/lib/reconcile";
-import { SAMPLES, sampleImageUrl } from "@/lib/samples";
+import { TEST_KIT, TEST_KIT_DIR } from "@/lib/samples";
 import { EMPTY_APPLICATION, type Application, type VerificationResult } from "@/lib/types";
 import { DropZone } from "./DropZone";
 import { ResultView } from "./ResultView";
@@ -31,7 +31,11 @@ interface Item {
   state: "waiting" | "checking" | "done" | "error" | "missing";
   result?: VerificationResult;
   error?: string;
+  /** An image too small or broken to read fails the same way every time, so it isn't offered again. */
+  retry?: boolean;
 }
+
+const isLeftover = (it: Item) => it.state === "waiting" || (it.state === "error" && it.retry);
 
 type Filter = "all" | "fail" | "review" | "pass" | "error" | "missing";
 
@@ -139,21 +143,21 @@ export function BatchCheck() {
     setRun(null);
   }
 
-  async function loadExample() {
+  async function loadTestKit() {
     setNotices([]);
     try {
       const files = await Promise.all(
-        SAMPLES.map(async (s) => {
-          const blob = await (await fetch(sampleImageUrl(s))).blob();
-          const file = new File([blob], `${s.id}.jpg`, { type: "image/jpeg" });
+        TEST_KIT.filter((e) => e.hasImage).map(async (e) => {
+          const blob = await (await fetch(`${TEST_KIT_DIR}/labels/${e.file}`)).blob();
+          const file = new File([blob], e.file, { type: "image/jpeg" });
           return { file, name: file.name, hash: await sha256(file) };
         }),
       );
-      const text = await (await fetch("/samples/sample-batch.csv")).text();
+      const text = await (await fetch(`${TEST_KIT_DIR}/applications.csv`)).text();
       replaceImages(files);
-      setCsv({ ...parseApplicationsCsv(text), name: "sample-batch.csv" });
+      setCsv({ ...parseApplicationsCsv(text), name: "applications.csv" });
     } catch {
-      setNotices(["The example batch couldn't be loaded. Check your connection."]);
+      setNotices(["The test labels couldn't be loaded. Check your connection."]);
     }
   }
 
@@ -186,7 +190,11 @@ export function BatchCheck() {
             update(i, { state: "waiting" });
             return;
           }
-          update(i, { state: "error", error: e instanceof Error ? e.message : "Couldn't check this label." });
+          update(i, {
+            state: "error",
+            error: e instanceof Error ? e.message : "Couldn't check this label.",
+            retry: !(e instanceof CheckError) || e.retry,
+          });
         }
       }
     };
@@ -227,7 +235,7 @@ export function BatchCheck() {
   function resume() {
     process(
       items,
-      items.flatMap((it, i) => (it.state === "waiting" || it.state === "error" ? [i] : [])),
+      items.flatMap((it, i) => (isLeftover(it) ? [i] : [])),
     );
   }
 
@@ -240,7 +248,7 @@ export function BatchCheck() {
     error: items.filter((i) => i.state === "error").length,
     missing: items.filter((i) => i.state === "missing").length,
   };
-  const leftover = items.filter((i) => i.state === "waiting" || i.state === "error").length;
+  const leftover = items.filter(isLeftover).length;
 
   let timeLeft: string | null = null;
   if (running && run) {
@@ -278,15 +286,21 @@ export function BatchCheck() {
           For importers who send hundreds of labels at once. Add the images and a spreadsheet of what each
           application says, then check them all in one go.
         </p>
-        <p className="mt-2">
+        <p className="mt-2 text-lg">
+          No labels handy?{" "}
           <button
             type="button"
-            onClick={loadExample}
+            onClick={loadTestKit}
             disabled={running}
-            className="text-lg text-blue underline underline-offset-2"
+            className="text-blue underline underline-offset-2"
           >
-            Load the example batch ({SAMPLES.length} labels)
+            Load the test labels ({TEST_KIT.filter((e) => e.hasImage).length} images)
           </button>
+          , or{" "}
+          <a href="/test-kit.zip" download className="text-blue underline underline-offset-2">
+            download them
+          </a>{" "}
+          with an answer key and add them yourself.
         </p>
       </div>
 

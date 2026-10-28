@@ -284,6 +284,13 @@ function Examples({ onPick, disabled }: { onPick: (s: Sample) => void; disabled:
           </li>
         ))}
       </ul>
+      <p className="mt-2 text-muted">
+        More test labels, with an answer key:{" "}
+        <a href="/test-kit.zip" download className="text-blue underline underline-offset-2">
+          download the test kit
+        </a>
+        .
+      </p>
     </div>
   );
 }

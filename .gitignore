@@ -45,3 +45,6 @@ next-env.d.ts
 
 # OCR engine, copied from node_modules by scripts/copy-ocr-assets.mjs
 /public/ocr/
+
+# test kit download, packed from public/test-kit by scripts/zip-test-kit.mjs
+/public/test-kit.zip

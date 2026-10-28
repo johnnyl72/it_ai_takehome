@@ -10,7 +10,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import sharp from "sharp";
 import { applicationsToCsv } from "../src/lib/csv";
-import { SAMPLES } from "../src/lib/samples";
+import { SAMPLES, sampleImageUrl } from "../src/lib/samples";
 
 const COUNT = 300;
 const OUT = "load-test";
@@ -23,7 +23,7 @@ async function main() {
   for (let i = 1; i <= COUNT; i++) {
     const s = SAMPLES[(i - 1) % SAMPLES.length];
     const file = `label-${String(i).padStart(3, "0")}.jpg`;
-    const src = await readFile(`public/samples/${s.id}.jpg`);
+    const src = await readFile(`public${sampleImageUrl(s)}`);
     const { width = 1200, height = 1600 } = await sharp(src).metadata();
     const stamp = Buffer.from(
       `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><text x="${width - 90}" y="${height - 70}" font-size="22" font-family="Helvetica" text-anchor="end" fill="#555">LOT ${String(i).padStart(4, "0")}</text></svg>`,

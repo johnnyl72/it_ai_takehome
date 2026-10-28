@@ -4,7 +4,15 @@ import type { Application, VerificationResult } from "../types";
 import { ImageError, loadGray } from "./image";
 import { ENGINE, withReader } from "./ocr";
 
-export class CheckError extends Error {}
+export class CheckError extends Error {
+  /** False when checking the same file again can't help, such as an image too small to read. */
+  constructor(
+    message: string,
+    readonly retry = true,
+  ) {
+    super(message);
+  }
+}
 
 /**
  * Checks one label, entirely in this browser: the image is read here and
@@ -20,7 +28,7 @@ export async function checkLabel(
   try {
     gray = await loadGray(file);
   } catch (e) {
-    throw new CheckError(e instanceof ImageError ? e.message : `"${file.name}" couldn't be opened.`);
+    throw new CheckError(e instanceof ImageError ? e.message : `"${file.name}" couldn't be opened.`, false);
   }
   // A label already being read finishes; stopping only skips the ones not started.
   signal?.throwIfAborted();

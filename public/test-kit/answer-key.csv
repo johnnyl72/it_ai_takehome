@@ -1,0 +1,25 @@
+file,expected result,what it tests,what the result should say
+01-old-tom-bourbon.jpg,Match,Everything correct,Every field matches and the warning is correct.
+02-stones-throw-gin.jpg,Match,"Brand in capitals, application in title case","Brand name matches, with a note that the label prints it in capital letters."
+03-chateau-marcel-wine.jpg,Match,Imported wine with country of origin,"Country of origin matches ""Product of France"", and 750 ML matches 750 mL."
+04-vino-del-sol-wine.jpg,Match,Net contents in centilitres,Net contents match: 75 cL is the same as 750 mL. The bottler matches with Illinois spelled out.
+05-kestrel-moor-scotch.jpg,Match,Country written differently,"Country of origin matches: the label says Scotland, the application United Kingdom."
+06-trailhead-ipa-photo.jpg,Match,"Photo taken at an angle, with glare; its CSV row says .png","Everything matches after the tool straightens the tilted photo. Its CSV row says 06-trailhead-ipa-photo.png, and it's matched anyway, ignoring the extension."
+07-blue-heron-brandy.jpg,Review,Warning shrunk to tiny print,"Government warning: Review. The warning is in tiny print, under half the height of the other small text, with the 2 mm minimum for this bottle size."
+08-juniper-hollow-gin.jpg,Review,Brand misspelled on the label,"Brand name: Review. The label says ""JUNIPER HOLOW"", one letter off from the application."
+09-lone-pine-bourbon.jpg,Review,Bottler's city differs,"Bottler / producer: Review. Mostly matches, but the label says Dallas where the application says Austin."
+10-cedar-point-blurry-photo.jpg,Review,Out-of-focus photo,"Review, with a note that the image is hard to read. Text that can't be read (the bottler, the warning) is sent for review, not called wrong."
+11-harbor-light-rum.jpg,Problem,Warning heading in title case,"Government warning: Problem. The heading reads ""Government Warning:"" and must be in capitals."
+12-copper-ridge-vodka.jpg,Problem,Alcohol content doesn't match,"Alcohol content: Problem. The application says 45%, the label 40%."
+13-summit-reserve-whiskey.jpg,Problem,Warning reworded and not bold,"Government warning: Problem. ""serious"" is added to the wording (shown highlighted), and the heading is not bold."
+14-silver-crown-tequila.jpg,Problem,Wrong brand name,"Brand name: Problem. The application says Silver Creek, the label Silver Crown."
+15-prairie-wind-vodka.jpg,Problem,Net contents don't match,"Net contents: Problem. The application says 750 mL, the label 700 mL."
+16-iron-gate-gin.jpg,Problem,Proof doesn't agree with the percentage,"Alcohol content: Problem. The percentage matches, but 45% is 90 proof, not the 80 printed."
+17-sandhill-bourbon.jpg,Problem,Warning heading not bold,"Government warning: Problem. ""GOVERNMENT WARNING:"" is not bold. The wording itself is correct."
+18-wild-clover-mead.jpg,Problem,No government warning,Government warning: Problem. No government warning found on the label.
+19-palm-cove-rum.jpg,Problem,Wrong country of origin,"Country of origin: Problem. The application says Jamaica, the label Barbados."
+20-villa-rosetta-wine.jpg,Problem,"Imported, but no country on the label",Country of origin: Problem. The application says Italy; no country is on the label.
+21-old-tom-bourbon-small.jpg,Couldn't check,Image too small to read,Couldn't check: the image is too small to read (400 × 533 pixels). It's turned back before any reading.
+22-old-tom-bourbon-copy.jpg,Match,Same image under two names,"Match, and flagged as an exact copy of 01-old-tom-bourbon.jpg."
+23-night-owl-liqueur.jpg,Match,Image with no row in the CSV,"Not in applications.csv, so only the warning is checked: ""Warning is correct; no application details to compare""."
+24-red-barn-rye.jpg,Missing image,Row in the CSV with no image,"Listed as ""Missing image"": the CSV has this application, but no image was included."
