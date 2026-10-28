@@ -1,6 +1,6 @@
 # Label Check
 
-**Try it: [itaitakehome.vercel.app](https://itaitakehome.vercel.app).** Use "Try an example" or "Load the example batch" to test without your own labels.
+**Try it: [itaitakehome.vercel.app](https://itaitakehome.vercel.app).** To test without your own labels, use "Try an example", or "Load the test labels" on the batch screen. Or [download the test kit](https://itaitakehome.vercel.app/test-kit.zip): 23 fake labels with an answer key.
 
 ![How a label is checked: the agent's browser loads the image, Tesseract OCR reads it, and plain rules decide](docs/label_check_flow.png)
 
@@ -16,13 +16,27 @@ Everything runs in the agent's browser with free, open-source OCR (Tesseract). T
 npm install
 npm run dev        # http://localhost:3000
 npm test           # unit tests for the comparison, warning, OCR image and batch logic
-npm run eval       # runs all sample labels through the real OCR pipeline in Node
+npm run eval       # runs every test label through the real OCR pipeline in Node
 npm run build      # static production build
 ```
 
-Node 20+. `npm run dev` and `npm run build` first copy the OCR engine and English data from `node_modules` into `public/ocr/`, so the app serves them itself.
+Node 20+. `npm run dev` and `npm run build` first copy the OCR engine and English data from `node_modules` into `public/ocr/`, so the app serves them itself, and pack the test kit into `public/test-kit.zip`.
 
-To try it without your own labels, use **Try an example** on the first screen or **Load the example batch** on the second. To regenerate the sample images, run `npm run samples`. For a 300-label test batch, run `npm run load-batch`; it writes to `load-test/`.
+To regenerate the test labels, run `npm run samples`. For a 300-label test batch, run `npm run load-batch`; it writes to `load-test/`.
+
+## Test kit
+
+`public/test-kit/` holds 23 fake labels, an `applications.csv` for the batch screen, and `answer-key.csv`, which says what each label should get and why. Each label tests one rule. To run it, add the `labels` folder and the CSV on the batch screen, or press **Load the test labels** there. The kit's `README.txt` lists the counts to expect.
+
+| Files | Expected | What they test |
+|---|---|---|
+| 01–06 | Match | A correct label; brand in capitals vs title case; an accented import with its country; 75 cL vs 750 mL; Scotland vs United Kingdom; a tilted photo with glare |
+| 07–10 | Review | Warning in tiny print; brand misspelled by one letter; bottler's city differs; an out-of-focus photo |
+| 11–20 | Problem | Heading in title case; wrong alcohol; reworded warning, not bold; wrong brand; wrong net contents; proof doesn't match the percentage; heading not bold; no warning; wrong country; import with no country |
+| 21 | Couldn't check | Image too small to read |
+| 22–24 | Batch only | An exact copy of 01; an image with no CSV row (warning checked only); a CSV row with no image |
+
+A full run should end with 10 problems, 4 to review, 8 matches, 1 couldn't check and 1 missing image.
 
 ## How it works
 
@@ -65,10 +79,10 @@ This reconciliation design came from production experience validating Amazon Tra
 
 ## Measured
 
-On a MacBook, with the 8 sample labels (generated in `public/samples/`, each aimed at a case from the interviews):
+On a MacBook, with the test kit:
 
-- `npm run eval`: **8/8 verdicts as expected**, 0 looser than expected, 1.0–1.7 s per label in Node.
-- In Chrome: 1.1–1.7 s per label for a single check, comfortably inside the 5-second limit. The slowest is the tilted, glare-heavy photo. The 8-label example batch finishes in 3 s.
+- `npm run eval`: **every label gets the result in the answer key** (22 read, plus the too-small image turned back), 0 looser than expected, 0.7–2.7 s per label in Node. The slowest is the out-of-focus photo.
+- In Chrome: 1.1–1.7 s per label for a single check, comfortably inside the 5-second limit. The whole kit finishes in 8 s on the batch screen, and all 24 rows match the answer key, whether it's loaded with the button or the unzipped folder is added by hand.
 - A 300-label batch (`npm run load-batch`, with a deliberately messy CSV) finishes in **2 minutes** in Chrome, about 0.4 s per label with 4 labels in parallel. Every verdict matches the test data, and reconciliation catches each planted mistake: 2 applications with no image, 2 images with no row, and 1 row naming `.png` for a `.jpg`. No request goes to any other site.
 
 ## Decisions and trade-offs
@@ -81,6 +95,7 @@ On a MacBook, with the 8 sample labels (generated in `public/samples/`, each aim
 ## Limitations
 
 - Glare, curved bottles and blurry photos lower OCR accuracy. The tool sends these to Review rather than passing them, but it can't read what isn't legible.
+- A slightly blurry photo can still read as clear and misread a word (`10` for `to`), which shows as a Problem. That errs on the strict side: the agent looks, and nothing wrong gets through.
 - Bold detection is a measurement, not a certainty. Unclear cases go to Review.
 - Physical type size (mm) can't be measured from a photo, which has no scale. Only relative size is flagged.
 - The first visit downloads about 7 MB of OCR engine and data; later visits use the cached copy.
@@ -103,5 +118,5 @@ src/lib/warning.ts  government warning rules
 src/lib/csv.ts, reconcile.ts   batch CSV parsing and reconciliation
 src/lib/client/     browser-only: OCR worker pool, image loading
 src/components/     the two screens and the results view
-scripts/            sample generation, eval, load batch, OCR asset copy
+scripts/            test kit generation and zip, eval, load batch, OCR asset copy
 ```
