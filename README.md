@@ -4,13 +4,26 @@
 
 *I built this with an AI coding assistant. The decisions are mine, from building and running label validation in production on AWS.*
 
-![How a label is checked: the agent's browser loads the image, Tesseract OCR reads it, and plain rules decide](docs/label_check_flow.png)
-
-*Top lane: what the agent does. Middle lane: how the label is read. Bottom lane, read right to left: how each field and the government warning are judged. Diamonds are decisions; blue boxes explain why.*
-
 A prototype for TTB label compliance agents. Add a label image and what the COLA application says. The tool reads the label, compares each field, and checks the government warning word for word. New applications are checked automatically as they arrive: the clean ones clear without a person, and the rest land in an agent's queue with the reason.
 
 Everything runs in the agent's browser with free, open-source OCR (Tesseract). There are no AI or cloud API calls, and images are never uploaded.
+
+## Screens
+
+![Dave's queue: only what the automatic checks flagged for him, each with its reason, and how many cleared today with no one looking](docs/screenshots/queue.png)
+
+*An agent's front page: only what needs a person, each with the reason it was flagged.*
+
+| | |
+|---|---|
+| ![Reviewing Copper Ridge: the work bar with 1 of 7 and Previous and Next, why it was flagged, and the check beside the label](docs/screenshots/review.png) | ![The automatic checks page: running live, today's totals, and the flagged table with filters](docs/screenshots/automatic-checks.png) |
+| *Working one: where you are in the queue, why it was flagged, and the check beside the label.* | *Automatic checks: flagged and cleared kept apart, with filters.* |
+| ![The decision panel with Needs correction chosen and the reason filled in from the check](docs/screenshots/decision.png) | ![The Switch user menu: each person with their role and what it can do](docs/screenshots/switch-user.png) |
+| *Deciding: the reason starts from what the check found. One button records it and opens the next.* | *Switch user: every role, and what it sees and does.* |
+| ![The supervisor's week: applications finished per day and each agent's numbers](docs/screenshots/team-week.png) | ![The admin's grid of what each role can see and do](docs/screenshots/roles.png) |
+| *The supervisor's Team page: pace, decisions and spot checks per agent.* | *The admin decides what each role can see and do.* |
+| ![Day by day: cleared and flagged per day for two weeks, with the table](docs/screenshots/daily-report.png) | <img src="docs/screenshots/phone.png" width="280" alt="The queue on a phone, as cards"> |
+| *The day-by-day report, with a CSV download.* | *On a phone the queue becomes cards.* |
 
 ## Run it
 
@@ -26,51 +39,17 @@ Node 20+. `npm run dev` and `npm run build` first copy the OCR engine and Englis
 
 To regenerate the test labels, run `npm run samples`. For a 300-label test batch, run `npm run load-batch`; it writes to `load-test/`.
 
-## Automatic checks, queue, roles and tracking
+## Approach
 
-At 150,000 applications a year, about 600 a working day, most of what agents do is matching a form against a label. So every new application is checked as it arrives, before anyone opens it:
+### Frontend: what runs today
 
-- **A clean match on a good image clears without a person.** Every field matches, the warning is word for word with a bold heading, and the image reads clearly.
-- **Anything else goes to an agent's queue**, with the reason in one line.
-- **1 in 20 clearances goes to a person anyway**, as a spot check that the automatic clearing is right.
-- **Nothing is sent back or rejected without a person.** The system admin can turn automatic clearing off, or change the sample.
+A static Next.js site where everything runs in the agent's browser: the text reader, the rules, and the demo's queue, roles and automatic checks. There's no server code and no outside request.
 
-In the demo the checks run in your browser, standing in for the server's workers. COLA isn't connected, so arrivals are test-kit labels coming in every few seconds, and each one is really read and checked. **Automatic checks** (supervisor and admin) shows them live. **Flagged for a person** is the default view, with filters for why, who and status. Clearances have their own **Cleared automatically** tab, so success stays out of the way. A day-by-day report covers the last 14 days, with a CSV download. "Simulate an importer's batch of 200" plays out Sarah's peak-season rush.
+**Reading and judging a label.** The same steps run for every label, whether it arrives automatically, is opened from the queue or is added by hand.
 
-The front page is what an agent sees after signing in: only what was flagged for them, with counts at the top and each application's reason. Opening one shows the full check beside the label. The agent records a decision using COLAs Online's names: Approve, Needs correction or Reject. Sending one back needs a reason, and so does approving one the check found a problem with. **Record and open the next one** moves straight on, and a bar at the top shows "2 of 7 to work on" and how many they've finished today.
+![How a label is checked: the agent's browser loads the image, Tesseract OCR reads it, and plain rules decide](docs/label_check_flow.png)
 
-Sign-in is simulated, so you can try each role with **Switch user**:
-
-| Who | Role | Sees and does |
-|---|---|---|
-| Dave Morrison, Jenny Park, Janet | Agent | Their own queue and numbers; checks labels and batches |
-| Sarah Chen | Supervisor | Every queue, reassigning work, the Team page, and the automatic checks |
-| Marcus Williams | System admin | Users, roles and permissions, the automatic checks' settings, the audit log, and system health |
-
-- **Assignment.** Flagged applications go to the agent with the least open work. An agent whose specialty matches (spirits, wine or beer) is preferred, unless they're more than 2 ahead. "Balance the queues" evens things out with as few moves as possible, and a deactivated agent's work is reassigned. (`src/lib/demo/assign.ts`)
-- **Team page** (supervisor). Each agent's open work and oldest waiting application, how many they finished each day, and their median time per application. **Spot checks** list the decisions that went against the tool's check, the ones worth a second look.
-- **Admin** (system admin). Change roles and specialties, deactivate users, and tick what each role can do. The last admin can't be removed. **System health** shows check times against the 5-second target, and how often an image couldn't be read.
-- **Event log.** Every action is an event, and every number on those screens is computed from the log, so each one can be traced back. The log is also the audit trail, down to who opened which application.
-
-It's all kept in this browser (localStorage), with two weeks of made-up history so the screens aren't empty. The Admin page can reset it.
-
-"Your own labels" keeps the original tools for labels that aren't in COLA: one label typed in by hand, or a folder of images with a CSV.
-
-## Test kit
-
-`public/test-kit/` holds 23 fake labels, an `applications.csv` for the batch screen, and `answer-key.csv`, which says what each label should get and why. Each label tests one rule. To run it, add the `labels` folder and the CSV on the batch screen, or press **Load the test labels** there. The kit's `README.txt` lists the counts to expect.
-
-| Files | Expected | What they test |
-|---|---|---|
-| 01–06 | Match | A correct label; brand in capitals vs title case; an accented import with its country; 75 cL vs 750 mL; Scotland vs United Kingdom; a tilted photo with glare |
-| 07–10 | Review | Warning in tiny print; brand misspelled by one letter; bottler's city differs; an out-of-focus photo |
-| 11–20 | Problem | Heading in title case; wrong alcohol; reworded warning, not bold; wrong brand; wrong net contents; proof doesn't match the percentage; heading not bold; no warning; wrong country; import with no country |
-| 21 | Couldn't check | Image too small to read |
-| 22–24 | Batch only | An exact copy of 01; an image with no CSV row (warning checked only); a CSV row with no image |
-
-A full run should end with 10 problems, 4 to review, 8 matches, 1 couldn't check and 1 missing image.
-
-## How it works
+*Top lane: what the agent does. Middle lane: how the label is read. Bottom lane, read right to left: how each field and the government warning are judged. Diamonds are decisions; blue boxes explain why.*
 
 1. **Read** (`src/lib/ocr/pipeline.ts`):
    - The image is straightened: text-line angle is measured with a projection profile, then the image is rotated level.
@@ -94,7 +73,35 @@ Every field ends up **Match**, **Review** or **Problem**. Only an all-Match resu
 | Probable misreads (lookalike characters such as `0`/`O`, or words Tesseract itself was unsure of) go to Review, not Problem | Don't fail a good label over the tool's own reading mistake |
 | A poor image never gets a clean pass | Bad photos are flagged, not guessed at |
 
-**Batch** (`src/components/BatchCheck.tsx`, `src/lib/reconcile.ts`). Add images (files or a whole folder) and a CSV of applications, matched by file name. The CSV is the source of truth and the counts add up:
+**Automatic checks and the work queue.** At 150,000 applications a year, about 600 a working day, most of what agents do is matching a form against a label. So every new application is checked as it arrives, before anyone opens it:
+
+- **A clean match on a good image clears without a person.** Every field matches, the warning is word for word with a bold heading, and the image reads clearly.
+- **Anything else goes to an agent's queue**, with the reason in one line.
+- **1 in 20 clearances goes to a person anyway**, as a spot check that the automatic clearing is right.
+- **Nothing is sent back or rejected without a person.** The system admin can turn automatic clearing off, or change the sample.
+
+In the demo the checks run in your browser, standing in for the server's workers. COLA isn't connected, so arrivals are test-kit labels coming in every few seconds, and each one is really read and checked. **Automatic checks** (supervisor and admin) shows them live. **Flagged for a person** is the default view, with filters for why, who and status. Clearances have their own **Cleared automatically** tab, so success stays out of the way. A day-by-day report covers the last 14 days, with a CSV download. "Simulate an importer's batch of 200" plays out Sarah's peak-season rush.
+
+The front page is what an agent sees after signing in: only what was flagged for them, with counts at the top and each application's reason. Opening one shows the full check beside the label. The agent records a decision using COLAs Online's names: Approve, Needs correction or Reject. Sending one back needs a reason, and so does approving one the check found a problem with. **Record and open the next one** moves straight on, and a bar at the top shows "2 of 7 to work on" and how many they've finished today.
+
+**Roles and tracking.** Sign-in is simulated, so you can try each role with **Switch user**:
+
+| Who | Role | Sees and does |
+|---|---|---|
+| Dave Morrison, Jenny Park, Janet | Agent | Their own queue and numbers; checks labels and batches |
+| Sarah Chen | Supervisor | Every queue, reassigning work, the Team page, and the automatic checks |
+| Marcus Williams | System admin | Users, roles and permissions, the automatic checks' settings, the audit log, and system health |
+
+- **Assignment.** Flagged applications go to the agent with the least open work. An agent whose specialty matches (spirits, wine or beer) is preferred, unless they're more than 2 ahead. "Balance the queues" evens things out with as few moves as possible, and a deactivated agent's work is reassigned. (`src/lib/demo/assign.ts`)
+- **Team page** (supervisor). Each agent's open work and oldest waiting application, how many they finished each day, and their median time per application. **Spot checks** list the decisions that went against the tool's check, the ones worth a second look.
+- **Admin** (system admin). Change roles and specialties, deactivate users, and tick what each role can do. The last admin can't be removed. **System health** shows check times against the 5-second target, and how often an image couldn't be read.
+- **Event log.** Every action is an event, and every number on those screens is computed from the log, so each one can be traced back. The log is also the audit trail, down to who opened which application.
+
+It's all kept in this browser (localStorage), with two weeks of made-up history so the screens aren't empty. The Admin page can reset it.
+
+**Your own labels.** This tab keeps the original tools for labels that aren't in COLA: one label typed in by hand, or a folder of images with a CSV.
+
+**A folder and a CSV** (`src/components/BatchCheck.tsx`, `src/lib/reconcile.ts`). Add images (files or a whole folder) and a CSV of applications, matched by file name. The CSV is the source of truth and the counts add up:
 - Applications with no image appear as "Missing image" rows.
 - Images with no row get the warning check only.
 - Identical images under two names are flagged as duplicates.
@@ -108,6 +115,83 @@ The run itself:
 - "Show problems first" sorts the results, and the export CSV records what the label said for each field.
 
 This reconciliation design came from production experience validating Amazon Transparency codes on printed labels: check against the expected list, and keep "couldn't read" separate from "wrong".
+
+### Backend: if this were the job
+
+There's no backend on purpose: Marcus asked for a standalone prototype with nothing stored. As a real system, this is how I'd build it, from having built and run systems like it. My experience is with AWS, so each piece is named in AWS terms. TTB runs on Azure, so the table gives the Azure service that does the same job.
+
+![How applications come in: COLA publishes each filing, a queue feeds check workers, clean matches clear, flagged ones are assigned to an agent, and every result lands in one database with read replicas, an event log and daily totals](docs/application_intake_flow.png)
+
+*Top lane: a filing arrives from COLA. Second lane: the queue and check workers, with retries and a dead-letter queue. Third lane, read right to left: only flagged applications reach a person. Bottom lane: where results, the audit trail and reports live, and what's watched.*
+
+- **Event-driven batches.** A 300-label import becomes 300 messages, so a rush makes the queue longer, not the site slower. Workers scale with queue depth. A label that keeps failing lands in a dead-letter queue for a person to look at. The image's SHA-256 is the idempotency key, so a redelivered message or a re-uploaded image isn't read twice. The browser batch already works this way in miniature.
+- **Clearing and assignment as consumers.** The check worker publishes "cleared" or "flagged". A flagged event runs the same rule as `assign.ts`, and each assignment is published as its own event, so the agent's queue updates live and the audit log has it.
+- **Reports from rollups.** Daily totals are a materialized view over the event stream, so the day-by-day report never scans raw events.
+- **One writer, many readers.** Workers write results to the primary database. Agents' queues, search and reports read from read replicas, so a big import doesn't slow anyone's screen.
+- **Caching.** A CDN serves the app and the 7 MB OCR engine. Redis holds hot lookups, such as application data pulled from COLA and results by image hash, with short TTLs and no PII in the keys.
+- **PII.** Encrypted at rest and in transit, least-privilege access, and an audit log of who opened what. PII is redacted or deleted after a set window, such as 60 days, by storage lifecycle rules; the real number comes from TTB's records retention policy. Amazon Macie, which finds sensitive data with machine learning and pattern matching, scans storage for PII that ended up where it shouldn't be.
+- **Accounts.** Single sign-on through TTB's identity provider, with the roles above enforced on the server.
+- **Tracking and observability**, kept as two separate things:
+  - *Work tracking* is the append-only event log, as in the demo. Supervisors see the team's numbers and agents see their own. Operator data is employee data, so it's access-controlled like everything else.
+  - *System telemetry* is OpenTelemetry: one trace per label from upload through the queue and worker to the result, plus structured logs and metrics.
+  - *Alerts* come from the interviews: 95% of checks under 5 seconds (Sarah's limit), anything in the dead-letter queue, and any application waiting past target.
+
+| Piece | AWS | Azure |
+|---|---|---|
+| Image storage, deleted after N days | S3 with lifecycle rules | Blob Storage lifecycle management |
+| Events and queue | S3 event notifications, SQS with a dead-letter queue | Event Grid, Service Bus |
+| OCR workers | Lambda, or ECS on Fargate | Azure Functions, or Container Apps |
+| Results database | Aurora PostgreSQL with read replicas | Azure Database for PostgreSQL with read replicas |
+| Cache and CDN | ElastiCache, CloudFront | Azure Managed Redis, Front Door |
+| Live updates | API Gateway WebSockets | Web PubSub |
+| Finding PII | Macie | Microsoft Purview |
+| Keys and audit | KMS, CloudTrail | Key Vault, Azure Monitor activity logs |
+| Monitoring | CloudWatch, X-Ray | Azure Monitor, Application Insights |
+| Daily reports | Athena, QuickSight | Microsoft Fabric, Power BI |
+| Sign-in | Cognito, federated to the agency's identity provider | Microsoft Entra ID |
+| FedRAMP hosting | GovCloud (US) | Azure Government |
+
+## Tools used
+
+| Tool | What for |
+|---|---|
+| Next.js 16, React 19.3, TypeScript | The app. Every page is prerendered and runs in the browser |
+| Tailwind CSS 4 | Styling, from a small set of color and type tokens in `globals.css` |
+| tesseract.js 7 with English LSTM data | OCR, in Web Workers on WebAssembly, served from this site |
+| Papa Parse | Reading the batch CSV and writing the exports |
+| Vitest | Unit tests for the rules, reconciliation, roles, assignment and metrics |
+| tsx, sharp | Scripts: drawing the test labels and running the eval in Node |
+| ESLint, Prettier | Lint and format |
+| Headless Chrome (Puppeteer) | End-to-end runs of every screen, and these screenshots |
+| Vercel | Hosting |
+| Claude Code | The AI coding assistant I built it with |
+
+## Assumptions
+
+- **Applications come from COLA**, each with its form data and label artwork. Connecting to COLA is out of scope (Marcus), so the demo simulates arrivals with the test kit.
+- **The fields to check are the brief's list:** brand, class/type, alcohol content, net contents, bottler, country of origin for imports, and the government warning. A field left blank on the application isn't checked.
+- **The warning is 27 CFR 16.21**, with `GOVERNMENT WARNING:` in capitals and bold, and the type-size minimums of 16.22.
+- **"About 5 seconds" is what the agent waits for one label.** With automatic checks, the result is usually ready before anyone opens the application.
+- **Volume is about 600 applications a working day** (150,000 a year, from Sarah), with importer batches of 200–300.
+- **Automatic clearing is TTB's call.** The demo clears only certain matches, spot-checks a sample and has an off switch, so the policy can be set either way.
+- **Agents use a desktop browser, labels are in English, and images are JPG, PNG or WebP.** Half the team is over 50, so text is large and every action is a labelled button.
+- **Nothing sensitive is stored.** Images stay in memory. The demo's sign-in, queue and decisions are made-up data, kept only in that browser.
+- **The network blocks outside domains**, so the site fetches nothing from anywhere else.
+- **The demo's users are the interviewees**, so each view matches who asked for it.
+
+## Test kit
+
+`public/test-kit/` holds 23 fake labels, an `applications.csv` for the batch screen, and `answer-key.csv`, which says what each label should get and why. Each label tests one rule. To run it, add the `labels` folder and the CSV on the batch screen, or press **Load the test labels** there. The kit's `README.txt` lists the counts to expect.
+
+| Files | Expected | What they test |
+|---|---|---|
+| 01–06 | Match | A correct label; brand in capitals vs title case; an accented import with its country; 75 cL vs 750 mL; Scotland vs United Kingdom; a tilted photo with glare |
+| 07–10 | Review | Warning in tiny print; brand misspelled by one letter; bottler's city differs; an out-of-focus photo |
+| 11–20 | Problem | Heading in title case; wrong alcohol; reworded warning, not bold; wrong brand; wrong net contents; proof doesn't match the percentage; heading not bold; no warning; wrong country; import with no country |
+| 21 | Couldn't check | Image too small to read |
+| 22–24 | Batch only | An exact copy of 01; an image with no CSV row (warning checked only); a CSV row with no image |
+
+A full run should end with 10 problems, 4 to review, 8 matches, 1 couldn't check and 1 missing image.
 
 ## Measured
 
@@ -154,49 +238,6 @@ On a MacBook, with the test kit:
 - 95 unit tests (Vitest). `npm run eval` exits non-zero on any result looser than the answer key. A 300-label load test, and headless Chrome runs of every screen.
 - Status is never color alone, progress is announced with `aria-live`, errors are tied to their fields, and there's a skip link.
 
-## If this were the job
-
-There's no backend on purpose: Marcus asked for a standalone prototype with nothing stored. As a real system, this is how I'd build it, from having built and run systems like it. My experience is with AWS, so each piece is named in AWS terms. TTB runs on Azure, so the table gives the Azure service that does the same job.
-
-```mermaid
-flowchart LR
-  A["Agent's browser"] -- "upload, pre-signed URL" --> S[("Image storage")]
-  S -- "image added" --> Q[["Queue"]]
-  Q --> W["OCR workers<br/>scale with queue depth"]
-  Q -. "after 3 failed tries" .-> D[["Dead-letter queue"]]
-  W -- "write" --> P[("Results DB<br/>primary")]
-  P -- "replicate" --> R[("Read replicas")]
-  R -- "queues, search, reports" --> A
-  W -. "result ready" .-> A
-```
-
-- **Event-driven batches.** A 300-label import becomes 300 messages, so a rush makes the queue longer, not the site slower. Workers scale with queue depth. A label that keeps failing lands in a dead-letter queue for a person to look at. The image's SHA-256 is the idempotency key, so a redelivered message or a re-uploaded image isn't read twice. The browser batch already works this way in miniature.
-- **Clearing and assignment as consumers.** The check worker publishes "cleared" or "flagged". A flagged event runs the same rule as `assign.ts`, and each assignment is published as its own event, so the agent's queue updates live and the audit log has it.
-- **Reports from rollups.** Daily totals are a materialized view over the event stream, so the day-by-day report never scans raw events.
-- **One writer, many readers.** Workers write results to the primary database. Agents' queues, search and reports read from read replicas, so a big import doesn't slow anyone's screen.
-- **Caching.** A CDN serves the app and the 7 MB OCR engine. Redis holds hot lookups, such as application data pulled from COLA and results by image hash, with short TTLs and no PII in the keys.
-- **PII.** Encrypted at rest and in transit, least-privilege access, and an audit log of who opened what. PII is redacted or deleted after a set window, such as 60 days, by storage lifecycle rules; the real number comes from TTB's records retention policy. Amazon Macie, which finds sensitive data with machine learning and pattern matching, scans storage for PII that ended up where it shouldn't be.
-- **Accounts.** Single sign-on through TTB's identity provider, with the roles above enforced on the server.
-- **Tracking and observability**, kept as two separate things:
-  - *Work tracking* is the append-only event log, as in the demo. Supervisors see the team's numbers and agents see their own. Operator data is employee data, so it's access-controlled like everything else.
-  - *System telemetry* is OpenTelemetry: one trace per label from upload through the queue and worker to the result, plus structured logs and metrics.
-  - *Alerts* come from the interviews: 95% of checks under 5 seconds (Sarah's limit), anything in the dead-letter queue, and any application waiting past target.
-
-| Piece | AWS | Azure |
-|---|---|---|
-| Image storage, deleted after N days | S3 with lifecycle rules | Blob Storage lifecycle management |
-| Events and queue | S3 event notifications, SQS with a dead-letter queue | Event Grid, Service Bus |
-| OCR workers | Lambda, or ECS on Fargate | Azure Functions, or Container Apps |
-| Results database | Aurora PostgreSQL with read replicas | Azure Database for PostgreSQL with read replicas |
-| Cache and CDN | ElastiCache, CloudFront | Azure Managed Redis, Front Door |
-| Live updates | API Gateway WebSockets | Web PubSub |
-| Finding PII | Macie | Microsoft Purview |
-| Keys and audit | KMS, CloudTrail | Key Vault, Azure Monitor activity logs |
-| Monitoring | CloudWatch, X-Ray | Azure Monitor, Application Insights |
-| Daily reports | Athena, QuickSight | Microsoft Fabric, Power BI |
-| Sign-in | Cognito, federated to the agency's identity provider | Microsoft Entra ID |
-| FedRAMP hosting | GovCloud (US) | Azure Government |
-
 ## Limitations
 
 - Glare, curved bottles and blurry photos lower OCR accuracy. The tool sends these to Review rather than passing them, but it can't read what isn't legible.
@@ -206,7 +247,7 @@ flowchart LR
 - The first visit downloads about 7 MB of OCR engine and data; later visits use the cached copy.
 - HEIC photos open only in Safari. English labels only.
 - The automatic checks run in the browser tab here, so they stop when it's closed; in production they're server workers. Arrivals reuse the test kit's labels.
-- Sign-in, roles and the queue are simulated in this browser. There's no real authentication, COLA integration or server-side audit trail; see [If this were the job](#if-this-were-the-job).
+- Sign-in, roles and the queue are simulated in this browser. There's no real authentication, COLA integration or server-side audit trail; see [Backend: if this were the job](#backend-if-this-were-the-job).
 - One set of rules for every beverage. Wine and beer exceptions, such as beers that needn't show alcohol content, are handled only by leaving that field blank on the application.
 
 ## Next steps
@@ -228,4 +269,5 @@ src/lib/client/     browser-only: OCR worker pool, image loading, the automatic 
 src/app/            routes: / (queue), /review, /automation, /team, /admin, /check and /batch (your own labels)
 src/components/     the screens and the results view
 scripts/            test kit generation and zip, eval, load batch, OCR asset copy
+docs/               the diagrams and the screenshots above
 ```
