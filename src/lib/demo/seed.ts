@@ -5,10 +5,21 @@
  */
 import { TEST_KIT, type KitEntry } from "../samples";
 import { pickAgent } from "./assign";
-import type { Decision, DemoApplication, DemoEvent, DemoState, NewEvent, Precheck } from "./types";
-import { beverageOf, DEFAULT_PERMISSIONS, DEMO_USERS } from "./users";
+import type {
+  ClearedEntry,
+  DayTotals,
+  Decision,
+  DemoApplication,
+  DemoEvent,
+  DemoState,
+  NewEvent,
+  Precheck,
+} from "./types";
+import { beverageOf, DEFAULT_PERMISSIONS, DEMO_USERS, type Beverage } from "./users";
 
-export const DEMO_VERSION = 1;
+export const SPOT_CHECK_WHY = "Spot check: the automatic check cleared it. Confirm it's right.";
+
+export const DEMO_VERSION = 2;
 
 export const MINUTE = 60_000;
 export const HOUR = 60 * MINUTE;
@@ -16,6 +27,16 @@ export const DAY = 24 * HOUR;
 
 /** The kit labels that come with an application and an image: files 01 to 21. */
 export const QUEUE_KIT: KitEntry[] = TEST_KIT.filter((e) => e.hasImage && e.csvName && !e.copyOf);
+
+/** What the answer key says the automatic check finds for a kit label. */
+export const KIT_VERDICT = (e: KitEntry): Precheck =>
+  e.expected === "Match"
+    ? "pass"
+    : e.expected === "Review"
+      ? "review"
+      : e.expected === "Problem"
+        ? "fail"
+        : "unreadable";
 
 export const kitEntry = (file: string) => TEST_KIT.find((e) => e.file === file);
 
@@ -43,13 +64,15 @@ export function applicationFrom(
     receivedAt,
     assignee: null,
     status: "received",
+    verdict: null,
+    why: "",
+    spotCheck: false,
   };
 }
 
 /** Kit labels that start out finished, with the result the answer key gives them. */
 const SEEDED_DECISIONS: Record<string, { decision: Decision; precheck: Precheck; reason: string }> = {
-  "01-old-tom-bourbon.jpg": { decision: "approved", precheck: "pass", reason: "" },
-  "03-chateau-marcel-wine.jpg": { decision: "approved", precheck: "pass", reason: "" },
+  "02-stones-throw-gin.jpg": { decision: "approved", precheck: "pass", reason: "" },
   "11-harbor-light-rum.jpg": {
     decision: "needs-correction",
     precheck: "fail",
@@ -183,6 +206,83 @@ function history(seededAt: number, push: (e: NewEvent) => void) {
   }
 }
 
+/** Clean matches that start out already cleared, and the two sent to a person as spot checks. */
+const CLEARED_KIT = new Set([
+  "01-old-tom-bourbon.jpg",
+  "03-chateau-marcel-wine.jpg",
+  "04-vino-del-sol-wine.jpg",
+  "06-trailhead-ipa-photo.jpg",
+]);
+
+/**
+ * Two weeks of TTB-wide daily totals. 150,000 applications a year is about
+ * 600 a working day; filings keep coming at weekends, when only the
+ * automatic checks are working. One day has an importer's batch on top.
+ */
+function days(now: number): DayTotals[] {
+  const rnd = random(150000);
+  const today = new Date(now);
+  const elapsed = (today.getHours() * 60 + today.getMinutes()) / (24 * 60);
+  const worked = Math.min(1, Math.max(0, (today.getHours() + today.getMinutes() / 60 - 8) / 8.5));
+  const out: DayTotals[] = [];
+  for (let back = 13; back >= 0; back--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - back);
+    d.setHours(0, 0, 0, 0);
+    const weekend = d.getDay() === 0 || d.getDay() === 6;
+    let received = weekend ? 60 + Math.floor(rnd() * 80) : 520 + Math.floor(rnd() * 200);
+    if (!weekend && back === 3) received += 280;
+    const share = back === 0 ? elapsed : 1;
+    received = Math.round(received * share);
+    const cleared = Math.round(received * (0.66 + rnd() * 0.08));
+    const flagged = received - cleared;
+    const spotChecks = Math.round(cleared / 20);
+    const unreadable = Math.round(flagged * 0.05);
+    const review = Math.round(flagged * (0.42 + rnd() * 0.08));
+    const finished = weekend
+      ? 0
+      : Math.round((flagged + spotChecks) * (0.9 + rnd() * 0.2) * (back === 0 ? worked : 1));
+    out.push({
+      day: d.getTime(),
+      received,
+      cleared,
+      flagged,
+      review,
+      problem: flagged - review - unreadable,
+      unreadable,
+      spotChecks,
+      finished,
+    });
+  }
+  return out;
+}
+
+/** The latest clearances, so the Cleared table isn't empty before the first live check. */
+function recentClearances(now: number): ClearedEntry[] {
+  const rnd = random(4242);
+  const pick = <T>(list: T[]) => list[Math.floor(rnd() * list.length)];
+  const kinds: [Beverage, string][] = [
+    ["spirits", "Distilling"],
+    ["spirits", "Spirits"],
+    ["wine", "Cellars"],
+    ["wine", "Imports"],
+    ["beer", "Brewing Co."],
+  ];
+  return Array.from({ length: 40 }, (_, i) => {
+    const [beverage, suffix] = pick(kinds);
+    const brand = `${pick(ADJECTIVES)} ${pick(NOUNS)}`;
+    const at = now - (40 - i) * (2 + rnd() * 6) * MINUTE;
+    return {
+      at,
+      ttbId: ttbId(at, 300000 + i),
+      brand,
+      beverage,
+      applicant: `${brand} ${suffix}`,
+      ms: Math.round(1300 * Math.exp(0.25 * (rnd() - 0.5))),
+    };
+  }).sort((a, b) => a.at - b.at);
+}
+
 export function seed(now: number): DemoState {
   const events: DemoEvent[] = [];
   const push = (e: NewEvent) => events.push({ ...e, id: 0 } as DemoEvent);
@@ -191,26 +291,31 @@ export function seed(now: number): DemoState {
 
   const agents = DEMO_USERS.filter((u) => u.active && DEFAULT_PERMISSIONS[u.role].includes("queue.own"));
   const load = new Map(agents.map((a) => [a.id, 0]));
-  const applications = QUEUE_KIT.map((entry, i) =>
-    applicationFrom(
+  // Everything the automatic check couldn't clear, plus two spot checks of clean matches.
+  const applications = QUEUE_KIT.filter((e) => !CLEARED_KIT.has(e.file)).map((entry, i) => {
+    const app = applicationFrom(
       entry,
       `a${String(i + 1).padStart(2, "0")}`,
       now - ((i % 4) + 1) * DAY - ((i * 47) % 360) * MINUTE,
       i + 1,
-    ),
-  );
+    );
+    app.verdict = KIT_VERDICT(entry);
+    app.spotCheck = app.verdict === "pass";
+    app.why = app.spotCheck ? SPOT_CHECK_WHY : entry.answer;
+    return app;
+  });
   for (const app of [...applications].sort((a, b) => a.receivedAt - b.receivedAt)) {
     const ref = { appId: app.id, ttbId: app.ttbId, brand: app.brand };
     const to = pickAgent(app.beverage, agents, load)!;
     app.assignee = to;
     push({ type: "received", at: app.receivedAt, actor: "system", ...ref });
+    push({ type: "checked", at: app.receivedAt, actor: "system", ms: 1300, outcome: app.verdict!, ...ref });
     push({ type: "assigned", at: app.receivedAt, actor: "system", to, from: null, by: "auto", ...ref });
 
     const done = SEEDED_DECISIONS[app.kitFile];
     if (done) {
       const opened = app.receivedAt + 3 * HOUR;
       push({ type: "opened", at: opened, actor: to, ...ref });
-      push({ type: "checked", at: opened + 500, actor: "system", ms: 1300, outcome: done.precheck, ...ref });
       push({ type: "decided", at: opened + 4 * MINUTE, actor: to, ...done, ...ref });
       app.status = done.decision;
     } else {
@@ -229,7 +334,9 @@ export function seed(now: number): DemoState {
     applications,
     events,
     nextEventId: events.length + 1,
-    arrivals: 0,
+    automation: { running: true, autoClear: true, sampleEvery: 20, processed: 0, backlog: 0, recentMs: [] },
+    days: days(now),
+    cleared: recentClearances(now),
     bannerDismissed: false,
   };
 }

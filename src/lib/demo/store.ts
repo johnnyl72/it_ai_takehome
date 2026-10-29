@@ -4,13 +4,46 @@
  * The screens hide what a role can't do; this is what actually refuses it.
  */
 import { balance, openLoad, pickAgent } from "./assign";
-import { applicationFrom, QUEUE_KIT } from "./seed";
-import type { Decision, DemoApplication, DemoEvent, DemoState, EventDraft, Precheck } from "./types";
+import { applicationFrom, DAY, kitEntry, SPOT_CHECK_WHY } from "./seed";
+import type {
+  DayTotals,
+  Decision,
+  DemoApplication,
+  DemoEvent,
+  DemoState,
+  EventDraft,
+  Precheck,
+} from "./types";
 import { isOpen } from "./types";
 import { ROLES, type Beverage, type DemoUser, type Permission, type Role } from "./users";
 
-/** About 300 KB of JSON at the cap; the oldest events go first. */
-export const MAX_EVENTS = 2000;
+/** About 600 KB of JSON at the cap; the oldest events go first. */
+export const MAX_EVENTS = 4000;
+/** How many automatic clearances are listed; the daily totals count them all. */
+export const MAX_CLEARED = 200;
+
+export type ImageQuality = "good" | "fair" | "poor";
+
+/**
+ * What happens to a checked arrival. Only a clean match on a good image
+ * clears without a person, and 1 in `sampleEvery` of those goes to one
+ * anyway. Nothing is ever sent back or rejected without a person.
+ */
+export function route(
+  outcome: Precheck | "error",
+  quality: ImageQuality | null,
+  settings: { autoClear: boolean; sampleEvery: number },
+  n: number,
+): "cleared" | "spot-check" | "flagged" {
+  if (outcome !== "pass" || quality !== "good" || !settings.autoClear) return "flagged";
+  return settings.sampleEvery && n % settings.sampleEvery === 0 ? "spot-check" : "cleared";
+}
+
+/** The one-line reason a clean result still went to a person. */
+export const cleanButFlagged = (autoClear: boolean) =>
+  autoClear
+    ? "Matches, but the image isn't clear enough to clear without a person. Confirm by eye."
+    : "Matches. Automatic clearing is turned off, so a person confirms it.";
 
 export type DemoAction =
   | { type: "sign-in"; userId: string }
@@ -19,7 +52,18 @@ export type DemoAction =
   | { type: "decide"; appId: string; decision: Decision; reason: string; precheck: Precheck | null }
   | { type: "reassign"; appId: string; to: string }
   | { type: "balance" }
-  | { type: "arrive"; count: number }
+  | {
+      type: "auto-checked";
+      appId: string;
+      kitFile: string;
+      outcome: Precheck | "error";
+      quality: ImageQuality | null;
+      why: string;
+      ms: number;
+      fromBacklog: boolean;
+    }
+  | { type: "set-automation"; running?: boolean; autoClear?: boolean; sampleEvery?: number }
+  | { type: "queue-batch"; count: number }
   | { type: "set-role"; userId: string; role: Role }
   | { type: "set-active"; userId: string; active: boolean }
   | { type: "set-specialty"; userId: string; specialty: Beverage | null }
@@ -77,8 +121,13 @@ export function blocked(s: DemoState, a: DemoAction): string | null {
       if (!app || !isOpen(app.status)) return "Only open applications can be reassigned.";
       return assignable(s).some((u) => u.id === a.to) ? null : "That person doesn't take assigned work.";
     case "balance":
-    case "arrive":
       return can(s, actor, "queue.team") ? null : "Your role can't assign work.";
+    case "auto-checked":
+      return kitEntry(a.kitFile) && !s.applications.some((x) => x.id === a.appId) ? null : "No such label.";
+    case "set-automation":
+      return can(s, actor, "admin") ? null : "Only a system admin can change the automatic checks.";
+    case "queue-batch":
+      return can(s, actor, "automation.view") ? null : "Your role can't see the automatic checks.";
     case "set-role":
       if (!can(s, actor, "admin")) return "Only a system admin can change roles.";
       if (a.userId === actor) return "You can't change your own role.";
@@ -119,6 +168,31 @@ function reassignOrphans(s: DemoState, push: (e: EventDraft) => void) {
 
 const ref = (app: DemoApplication) => ({ appId: app.id, ttbId: app.ttbId, brand: app.brand });
 
+const EMPTY_DAY = {
+  received: 0,
+  cleared: 0,
+  flagged: 0,
+  review: 0,
+  problem: 0,
+  unreadable: 0,
+  spotChecks: 0,
+  finished: 0,
+};
+
+/** Adds to today's totals, starting a new day (and dropping the oldest) when the date changes. */
+function bumpToday(s: DemoState, now: number, add: Partial<Omit<DayTotals, "day">>) {
+  const day = new Date(now).setHours(0, 0, 0, 0);
+  const days = (s.days.at(-1)?.day === day ? s.days : [...s.days, { day, ...EMPTY_DAY }]).filter(
+    (d) => d.day > day - 14 * DAY,
+  );
+  const last = { ...days.at(-1)! };
+  for (const [k, v] of Object.entries(add) as [keyof typeof add, number][]) last[k] += v;
+  s.days = [...days.slice(0, -1), last];
+}
+
+/** The next automatic arrival's id; the reducer refuses an id it has already used. */
+export const nextArrivalId = (s: DemoState) => `n${s.automation.processed + 1}`;
+
 export function reduce(state: DemoState, a: DemoAction, now: number): DemoState {
   if (blocked(state, a)) return state;
   const s: DemoState = { ...state, events: [...state.events] };
@@ -152,6 +226,7 @@ export function reduce(state: DemoState, a: DemoAction, now: number): DemoState 
         ...ref(app!),
       });
       update(app!.id, { status: a.decision });
+      bumpToday(s, now, { finished: 1 });
       break;
     case "reassign":
       if (app!.assignee === a.to) return state;
@@ -165,22 +240,68 @@ export function reduce(state: DemoState, a: DemoAction, now: number): DemoState 
         update(move.appId, { assignee: move.to });
       }
       break;
-    case "arrive": {
-      const agents = assignable(s);
-      const load = openLoad(s.applications, agents);
-      for (let i = 0; i < a.count; i++) {
-        const n = s.arrivals++;
-        // Steps through the kit by 8 so consecutive arrivals mix spirits, wine and beer.
-        const entry = QUEUE_KIT[(n * 8) % QUEUE_KIT.length];
-        const fresh = applicationFrom(entry, `n${n + 1}`, now, 500 + n);
-        const to = pickAgent(fresh.beverage, agents, load);
-        if (to) load.set(to, (load.get(to) ?? 0) + 1);
-        s.applications = [...s.applications, { ...fresh, assignee: to }];
-        push({ type: "received", actor: "system", ...ref(fresh) });
-        if (to) push({ type: "assigned", actor: "system", to, from: null, by: "auto", ...ref(fresh) });
+    case "auto-checked": {
+      const n = s.automation.processed + 1;
+      const fresh = applicationFrom(kitEntry(a.kitFile)!, a.appId, now, 500000 + n);
+      const way = route(a.outcome, a.quality, s.automation, n);
+      s.automation = {
+        ...s.automation,
+        processed: n,
+        backlog: a.fromBacklog ? Math.max(0, s.automation.backlog - 1) : s.automation.backlog,
+        recentMs: [...s.automation.recentMs, a.ms].slice(-100),
+      };
+      // A clearance goes to the totals and the Cleared list, not the event log: at
+      // hundreds a day they'd crowd out everything else this demo can store.
+      if (way === "cleared") {
+        const { ttbId, brand, beverage, applicant } = fresh;
+        s.cleared = [...s.cleared, { at: now, ttbId, brand, beverage, applicant, ms: a.ms }].slice(
+          -MAX_CLEARED,
+        );
+        bumpToday(s, now, { received: 1, cleared: 1 });
+        break;
       }
+      // Anything else becomes an application in someone's queue, with the reason.
+      const verdict = a.outcome === "error" ? null : a.outcome;
+      const why =
+        way === "spot-check"
+          ? SPOT_CHECK_WHY
+          : a.outcome === "pass"
+            ? cleanButFlagged(s.automation.autoClear)
+            : a.why;
+      const agents = assignable(s);
+      const to = pickAgent(fresh.beverage, agents, openLoad(s.applications, agents));
+      const app = { ...fresh, assignee: to, verdict, why, spotCheck: way === "spot-check" };
+      s.applications = [...s.applications, app];
+      push({ type: "received", actor: "system", ...ref(app) });
+      push({ type: "checked", actor: "system", ms: a.ms, outcome: a.outcome, ...ref(app) });
+      if (to) push({ type: "assigned", actor: "system", to, from: null, by: "auto", ...ref(app) });
+      const kind =
+        verdict === "fail"
+          ? { problem: 1 }
+          : verdict === "unreadable" || verdict === null
+            ? { unreadable: 1 }
+            : { review: 1 };
+      bumpToday(
+        s,
+        now,
+        way === "spot-check"
+          ? { received: 1, cleared: 1, spotChecks: 1 }
+          : { received: 1, flagged: 1, ...kind },
+      );
       break;
     }
+    case "set-automation":
+      for (const key of ["running", "autoClear", "sampleEvery"] as const) {
+        const value = a[key];
+        if (value === undefined || value === s.automation[key]) continue;
+        s.automation = { ...s.automation, [key]: value };
+        push({ type: "automation-changed", actor, setting: key, value });
+      }
+      break;
+    case "queue-batch":
+      s.automation = { ...s.automation, backlog: s.automation.backlog + a.count };
+      push({ type: "batch-queued", actor, count: a.count });
+      break;
     case "set-role":
       s.users = s.users.map((u) => (u.id === a.userId ? { ...u, role: a.role } : u));
       push({ type: "role-changed", actor, userId: a.userId, role: a.role });
@@ -219,6 +340,7 @@ export function reduce(state: DemoState, a: DemoAction, now: number): DemoState 
 export function homeFor(s: DemoState, userId: string): string {
   if (can(s, userId, "queue.own") || can(s, userId, "queue.team")) return "/";
   if (can(s, userId, "admin") || can(s, userId, "system.health")) return "/admin";
+  if (can(s, userId, "automation.view")) return "/automation";
   if (can(s, userId, "check.single")) return "/check";
   return "/";
 }

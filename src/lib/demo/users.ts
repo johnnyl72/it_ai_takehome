@@ -13,6 +13,7 @@ export type Permission =
   | "team.monitor"
   | "stats.own"
   | "system.health"
+  | "automation.view"
   | "decide"
   | "check.single"
   | "check.batch"
@@ -50,6 +51,11 @@ export const PERMISSIONS: { id: Permission; label: string; detail: string }[] = 
   { id: "check.single", label: "Check a label", detail: "Checks one label typed in by hand." },
   { id: "check.batch", label: "Check a batch", detail: "Checks a folder of labels against a CSV." },
   { id: "ocr.text", label: "Text read from labels", detail: "Sees every line the reader found." },
+  {
+    id: "automation.view",
+    label: "Automatic checks",
+    detail: "Sees what was flagged and cleared, and the daily report.",
+  },
   { id: "system.health", label: "System health", detail: "Sees check times and error rates." },
   { id: "admin", label: "Manage users and roles", detail: "Changes roles, permissions and users." },
 ];
@@ -64,8 +70,9 @@ export const DEFAULT_PERMISSIONS: Record<Role, Permission[]> = {
     "check.single",
     "check.batch",
     "ocr.text",
+    "automation.view",
   ],
-  admin: ["system.health", "admin"],
+  admin: ["automation.view", "system.health", "admin"],
 };
 
 export const DEMO_USERS: DemoUser[] = [

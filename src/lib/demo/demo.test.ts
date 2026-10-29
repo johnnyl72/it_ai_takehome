@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 import { balance, pickAgent } from "./assign";
 import { agentWeek, health, overrides, percentile, workTimes } from "./metrics";
 import { DAY, MINUTE, QUEUE_KIT, seed } from "./seed";
-import { blocked, can, MAX_EVENTS, reduce, type DemoAction } from "./store";
+import {
+  blocked,
+  can,
+  MAX_CLEARED,
+  MAX_EVENTS,
+  nextArrivalId,
+  reduce,
+  route,
+  type DemoAction,
+} from "./store";
 import type { DemoApplication, DemoEvent, DemoState } from "./types";
 
 const NOW = new Date(2026, 9, 28, 10, 30).getTime();
@@ -10,13 +19,19 @@ const as = (s: DemoState, userId: string): DemoState => ({ ...s, currentUser: us
 const run = (s: DemoState, ...actions: DemoAction[]) => actions.reduce((st, a) => reduce(st, a, NOW), s);
 
 describe("seed", () => {
-  it("puts every kit label with an application and an image in the queue once", () => {
+  it("queues only what the automatic check couldn't clear, plus two spot checks", () => {
     const s = seed(NOW);
     expect(QUEUE_KIT.map((e) => e.file.slice(0, 2))).toEqual(
       Array.from({ length: 21 }, (_, i) => String(i + 1).padStart(2, "0")),
     );
-    expect(s.applications).toHaveLength(21);
-    expect(new Set(s.applications.map((a) => a.ttbId)).size).toBe(21);
+    expect(s.applications.map((a) => a.kitFile.slice(0, 2))).toEqual([
+      "02",
+      "05",
+      ...Array.from({ length: 15 }, (_, i) => String(i + 7).padStart(2, "0")),
+    ]);
+    expect(s.applications.filter((a) => a.spotCheck).map((a) => a.verdict)).toEqual(["pass", "pass"]);
+    expect(s.applications.filter((a) => !a.spotCheck).every((a) => a.verdict !== "pass" && a.why)).toBe(true);
+    expect(new Set(s.applications.map((a) => a.ttbId)).size).toBe(17);
     expect(s.applications.every((a) => a.ttbId.length === 14 && a.assignee)).toBe(true);
   });
 
@@ -24,10 +39,21 @@ describe("seed", () => {
     const s = seed(NOW);
     const done = s.applications.filter((a) => a.status !== "received");
     expect(done.map((a) => [a.kitFile.slice(0, 2), a.status])).toEqual([
-      ["01", "approved"],
-      ["03", "approved"],
+      ["02", "approved"],
       ["11", "needs-correction"],
     ]);
+  });
+
+  it("seeds two weeks of daily totals that add up, with today still in progress", () => {
+    const s = seed(NOW);
+    expect(s.days).toHaveLength(14);
+    for (const d of s.days) {
+      expect(d.cleared + d.flagged).toBe(d.received);
+      expect(d.review + d.problem + d.unreadable).toBe(d.flagged);
+    }
+    const weekday = s.days.filter((d) => ![0, 6].includes(new Date(d.day).getDay())).slice(0, -1);
+    expect(Math.min(...weekday.map((d) => d.received))).toBeGreaterThanOrEqual(520);
+    expect(s.days.at(-1)!.received).toBeLessThan(weekday[0].received);
   });
 
   it("makes the same history every time", () => {
@@ -129,20 +155,94 @@ describe("reduce", () => {
     expect(s.events.filter((e) => e.type === "assigned" && e.at === NOW).length).toBeGreaterThan(0);
   });
 
-  it("auto-assigns new arrivals and logs who got each one", () => {
-    const s = run(as(seed(NOW), "sarah"), { type: "arrive", count: 5 });
-    const fresh = s.applications.filter((a) => a.id.startsWith("n"));
-    expect(fresh).toHaveLength(5);
-    expect(new Set(fresh.map((a) => a.ttbId)).size).toBe(5);
-    expect(fresh.every((a) => a.assignee)).toBe(true);
-    expect(s.events.filter((e) => e.type === "assigned" && e.by === "auto" && e.at === NOW)).toHaveLength(5);
+  const checked = (
+    s: DemoState,
+    outcome: "pass" | "review" | "fail" | "unreadable",
+    quality = "good" as const,
+  ) =>
+    reduce(
+      s,
+      {
+        type: "auto-checked",
+        appId: nextArrivalId(s),
+        kitFile: QUEUE_KIT[0].file,
+        outcome,
+        quality,
+        why: "Brand name: Problem.",
+        ms: 1200,
+        fromBacklog: false,
+      },
+      NOW,
+    );
+
+  it("clears a clean match on a good image without a person, and counts it", () => {
+    const before = seed(NOW);
+    const s = checked(before, "pass");
+    expect(s.applications).toHaveLength(before.applications.length);
+    expect(s.cleared).toHaveLength(before.cleared.length + 1);
+    expect(s.days.at(-1)!.cleared).toBe(before.days.at(-1)!.cleared + 1);
+    expect(s.events).toHaveLength(before.events.length);
   });
 
-  it("caps the event log", () => {
-    let s = as(seed(NOW), "sarah");
-    for (let i = 0; i < 600; i++) s = reduce(s, { type: "arrive", count: 1 }, NOW);
+  it("sends anything else to an agent's queue with the reason", () => {
+    const before = seed(NOW);
+    const s = checked(before, "fail");
+    const app = s.applications.at(-1)!;
+    expect(app).toMatchObject({
+      verdict: "fail",
+      why: "Brand name: Problem.",
+      status: "received",
+      spotCheck: false,
+    });
+    expect(app.assignee).toBeTruthy();
+    expect(s.days.at(-1)!.problem).toBe(before.days.at(-1)!.problem + 1);
+    expect(s.events.slice(-3).map((e) => e.type)).toEqual(["received", "checked", "assigned"]);
+    // A clean match on a fair photo still goes to a person.
+    expect(checked(before, "pass", "fair" as never).applications.at(-1)!.why).toMatch(/isn't clear enough/);
+  });
+
+  it("spot-checks 1 in N clearances, and clears nothing when turned off", () => {
+    expect(route("pass", "good", { autoClear: true, sampleEvery: 20 }, 40)).toBe("spot-check");
+    expect(route("pass", "good", { autoClear: true, sampleEvery: 20 }, 41)).toBe("cleared");
+    expect(route("pass", "good", { autoClear: true, sampleEvery: 0 }, 40)).toBe("cleared");
+    expect(route("pass", "good", { autoClear: false, sampleEvery: 20 }, 41)).toBe("flagged");
+    expect(route("review", "good", { autoClear: true, sampleEvery: 20 }, 41)).toBe("flagged");
+  });
+
+  it("only lets an admin change the automatic checks, and logs it", () => {
+    const s = seed(NOW);
+    expect(blocked(s, { type: "set-automation", autoClear: false })).toMatch(/system admin/);
+    const after = run(as(s, "marcus"), { type: "set-automation", autoClear: false, sampleEvery: 20 });
+    expect(after.automation.autoClear).toBe(false);
+    expect(after.events.filter((e) => e.type === "automation-changed")).toHaveLength(1);
+  });
+
+  it("takes an importer's batch as a backlog that each check works down", () => {
+    let s = run(as(seed(NOW), "sarah"), { type: "queue-batch", count: 3 });
+    expect(s.automation.backlog).toBe(3);
+    s = reduce(
+      s,
+      {
+        type: "auto-checked",
+        appId: nextArrivalId(s),
+        kitFile: QUEUE_KIT[0].file,
+        outcome: "pass",
+        quality: "good",
+        why: "",
+        ms: 900,
+        fromBacklog: true,
+      },
+      NOW,
+    );
+    expect(s.automation.backlog).toBe(2);
+  });
+
+  it("caps the event log and the cleared list", () => {
+    let s = seed(NOW);
+    for (let i = 0; i < 1500; i++) s = checked(s, i % 3 ? "review" : "pass");
     expect(s.events.length).toBe(MAX_EVENTS);
     expect(s.events.at(-1)!.id).toBe(s.nextEventId - 1);
+    expect(s.cleared.length).toBe(MAX_CLEARED);
   });
 });
 
@@ -177,6 +277,9 @@ describe("assignment", () => {
     receivedAt: Number(id.slice(1)),
     assignee,
     status,
+    verdict: "review",
+    why: "",
+    spotCheck: false,
   });
 
   it("evens out the queues with as few moves as possible, leaving work in review", () => {

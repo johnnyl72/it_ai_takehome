@@ -18,6 +18,52 @@ export interface DemoApplication {
   receivedAt: number;
   assignee: string | null;
   status: AppStatus;
+  /** What the automatic check found when it arrived; null if it never finished. */
+  verdict: Precheck | null;
+  /** Why it was flagged for a person, in one line. */
+  why: string;
+  /** A clean match sent to a person anyway, to keep the automatic clearing honest. */
+  spotCheck: boolean;
+}
+
+/** One application the automatic check cleared without a person. */
+export interface ClearedEntry {
+  at: number;
+  ttbId: string;
+  brand: string;
+  beverage: Beverage;
+  applicant: string;
+  ms: number;
+}
+
+/**
+ * One day's totals across all of TTB. At hundreds a day these are a rollup,
+ * as a warehouse table would keep them, not a count over individual events.
+ */
+export interface DayTotals {
+  day: number;
+  received: number;
+  cleared: number;
+  flagged: number;
+  review: number;
+  problem: number;
+  unreadable: number;
+  spotChecks: number;
+  finished: number;
+}
+
+export interface AutomationSettings {
+  running: boolean;
+  /** Clear a clean match on a good image without a person. */
+  autoClear: boolean;
+  /** Send 1 in this many automatic clearances to a person anyway; 0 for none. */
+  sampleEvery: number;
+  /** How many arrivals have been checked: numbers the next one. */
+  processed: number;
+  /** Arrivals waiting to be checked, such as an importer's batch. */
+  backlog: number;
+  /** The latest check times, for the live median. */
+  recentMs: number[];
 }
 
 /** Who or what made an assignment. */
@@ -49,6 +95,12 @@ export type DemoEvent = Base &
     | { type: "active-changed"; userId: string; active: boolean }
     | { type: "specialty-changed"; userId: string; specialty: Beverage | null }
     | { type: "permission-changed"; role: Role; permission: Permission; granted: boolean }
+    | {
+        type: "automation-changed";
+        setting: "running" | "autoClear" | "sampleEvery";
+        value: boolean | number;
+      }
+    | { type: "batch-queued"; count: number }
   );
 
 export type EventOf<T extends DemoEvent["type"]> = Extract<DemoEvent, { type: T }>;
@@ -68,7 +120,11 @@ export interface DemoState {
   /** Append-only and the source of every number on the Team and health screens. */
   events: DemoEvent[];
   nextEventId: number;
-  arrivals: number;
+  automation: AutomationSettings;
+  /** The last 14 days, oldest first. */
+  days: DayTotals[];
+  /** The latest automatic clearances, newest last. */
+  cleared: ClearedEntry[];
   bannerDismissed: boolean;
 }
 

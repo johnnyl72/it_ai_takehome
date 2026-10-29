@@ -34,8 +34,8 @@ export function describe(s: DemoState, e: DemoEvent, workedMs?: number): string 
       return `${who} opened ${e.brand}.`;
     case "checked":
       return e.outcome === "unreadable" || e.outcome === "error"
-        ? `The pre-check of ${e.brand} ${PRECHECK_WORDS[e.outcome]}.`
-        : `The pre-check of ${e.brand} found ${PRECHECK_WORDS[e.outcome]} in ${(e.ms / 1000).toFixed(1)} s.`;
+        ? `The automatic check of ${e.brand} ${PRECHECK_WORDS[e.outcome]}.`
+        : `The automatic check of ${e.brand} found ${PRECHECK_WORDS[e.outcome]} in ${(e.ms / 1000).toFixed(1)} s.`;
     case "decided": {
       const after = workedMs !== undefined ? ` (${minutes(workedMs)} after opening it)` : "";
       return `${who} marked ${e.brand} ${STATUS_LABEL[e.decision]}${after}${e.reason ? `: ${e.reason.replace(/\.$/, "")}` : ""}.`;
@@ -46,6 +46,14 @@ export function describe(s: DemoState, e: DemoEvent, workedMs?: number): string 
       return `${who} ${e.active ? "reactivated" : "deactivated"} ${nameOf(s, e.userId)}.`;
     case "specialty-changed":
       return `${who} set ${nameOf(s, e.userId)}'s specialty to ${e.specialty ? BEVERAGES[e.specialty].toLowerCase() : "none"}.`;
+    case "automation-changed":
+      if (e.setting === "running") return `${who} ${e.value ? "resumed" : "paused"} the automatic checks.`;
+      if (e.setting === "autoClear") return `${who} turned automatic clearing ${e.value ? "on" : "off"}.`;
+      return e.value
+        ? `${who} set spot checks to 1 in ${e.value} automatic clearances.`
+        : `${who} turned spot checks off.`;
+    case "batch-queued":
+      return `${who} added an importer's batch of ${e.count} applications to the automatic checks.`;
     case "permission-changed": {
       const p = PERMISSIONS.find((x) => x.id === e.permission)?.label ?? e.permission;
       return e.granted
