@@ -274,7 +274,11 @@ function Flagged({ state: s, now }: { state: DemoState; now: number }) {
                       </span>
                     )}
                   </td>
-                  <td className="max-w-md px-4 py-3">{a.why}</td>
+                  <td className="max-w-md px-4 py-3">
+                    <span className="line-clamp-3" title={a.why}>
+                      {a.why}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 whitespace-nowrap">{nameOf(s, a.assignee)}</td>
                   <td className="px-4 py-3">
                     <StatusPill status={a.status} />

@@ -48,6 +48,11 @@ body {
   outline-offset: 2px;
 }
 
+/* Headings focused from code, so screen readers announce a new result, aren't controls: no ring. */
+[tabindex="-1"]:focus-visible {
+  outline: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
