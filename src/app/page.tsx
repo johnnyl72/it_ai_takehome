@@ -1,5 +1,11 @@
-import { SingleCheck } from "@/components/SingleCheck";
+import { Suspense } from "react";
+import { PageLoading } from "@/components/Access";
+import { Queue } from "@/components/Queue";
 
 export default function Home() {
-  return <SingleCheck />;
+  return (
+    <Suspense fallback={<PageLoading />}>
+      <Queue />
+    </Suspense>
+  );
 }

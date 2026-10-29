@@ -144,10 +144,13 @@ function WarningRow({ check }: { check: Check }) {
 export function ResultView({
   result,
   headingRef,
+  showReadText = true,
 }: {
   result: VerificationResult;
   /** Focused after a check so screen readers announce the verdict. */
   headingRef?: Ref<HTMLHeadingElement>;
+  /** Every line the reader found; a role may be set not to see it. */
+  showReadText?: boolean;
 }) {
   const fields = result.checks.filter((c) => c.id !== "governmentWarning" && c.status !== "skipped");
   const skipped = result.checks.filter((c) => c.status === "skipped");
@@ -189,19 +192,21 @@ export function ResultView({
             : ""}
           .
         </p>
-        <details>
-          <summary className="cursor-pointer text-blue underline underline-offset-2">
-            Show all text read from the label
-          </summary>
-          <p className="mt-2 text-sm">
-            Average reading confidence {result.reading.meanConfidence}%. Lines in reading order:
-          </p>
-          <ol className="mt-1 list-decimal space-y-0.5 pl-6 font-serif text-ink">
-            {result.reading.lines.map((line, i) => (
-              <li key={i}>{line}</li>
-            ))}
-          </ol>
-        </details>
+        {showReadText && (
+          <details>
+            <summary className="cursor-pointer text-blue underline underline-offset-2">
+              Show all text read from the label
+            </summary>
+            <p className="mt-2 text-sm">
+              Average reading confidence {result.reading.meanConfidence}%. Lines in reading order:
+            </p>
+            <ol className="mt-1 list-decimal space-y-0.5 pl-6 font-serif text-ink">
+              {result.reading.lines.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ol>
+          </details>
+        )}
       </div>
     </section>
   );
