@@ -1,7 +1,7 @@
 "use client";
 
-import { useNow } from "@/lib/client/now";
 import { useId, useState } from "react";
+import { useNow } from "@/lib/client/now";
 import { describe, when } from "@/lib/demo/describe";
 import { workTimes } from "@/lib/demo/metrics";
 import type { DemoEvent, DemoState } from "@/lib/demo/types";
@@ -12,11 +12,13 @@ const ADMIN = new Set<DemoEvent["type"]>([
   "active-changed",
   "specialty-changed",
   "permission-changed",
+  "automation-changed",
+  "batch-queued",
 ]);
 
 const KINDS = {
   work: { label: "Work", has: (e: DemoEvent) => WORK.has(e.type) },
-  admin: { label: "User and role changes", has: (e: DemoEvent) => ADMIN.has(e.type) },
+  admin: { label: "Changes to users, roles and settings", has: (e: DemoEvent) => ADMIN.has(e.type) },
   checks: { label: "Pre-checks", has: (e: DemoEvent) => e.type === "checked" },
   all: { label: "Everything", has: () => true },
 };
@@ -24,8 +26,8 @@ type Kind = keyof typeof KINDS;
 
 /** The event log as sentences, newest first, filtered by person and kind. */
 export function ActivityFeed({ state: s, kinds }: { state: DemoState; kinds: "work" | "all" }) {
-  const [who, setWho] = useState("everyone");
-  const [kind, setKind] = useState<Kind>(kinds === "work" ? "work" : "all");
+  const [who, setWho] = useState("people");
+  const [kind, setKind] = useState<Kind>(kinds === "work" ? "work" : "admin");
   const [limit, setLimit] = useState(25);
   const whoId = useId();
   const kindId = useId();
@@ -33,7 +35,12 @@ export function ActivityFeed({ state: s, kinds }: { state: DemoState; kinds: "wo
   const times = workTimes(s.events);
 
   const shown = s.events
-    .filter((e) => KINDS[kind].has(e) && (who === "everyone" || e.actor === who))
+    // The automatic checks log hundreds of events a day; people's actions are what's usually wanted.
+    .filter(
+      (e) =>
+        KINDS[kind].has(e) &&
+        (who === "everyone" || (who === "people" ? e.actor !== "system" : e.actor === who)),
+    )
     .reverse();
 
   return (
@@ -49,7 +56,8 @@ export function ActivityFeed({ state: s, kinds }: { state: DemoState; kinds: "wo
             onChange={(e) => setWho(e.target.value)}
             className="mt-1 rounded-md border-2 border-line bg-white px-3 py-2 focus:border-blue"
           >
-            <option value="everyone">Everyone</option>
+            <option value="people">Everyone but the system</option>
+            <option value="everyone">Everyone, including the system</option>
             {s.users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name}

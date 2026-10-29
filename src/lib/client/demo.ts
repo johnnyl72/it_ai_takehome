@@ -29,7 +29,11 @@ function load(): DemoState {
   return seed(Date.now());
 }
 
-function save() {
+let saving: ReturnType<typeof setTimeout> | undefined;
+
+function write() {
+  clearTimeout(saving);
+  saving = undefined;
   try {
     localStorage.setItem(KEY, JSON.stringify(state));
   } catch {
@@ -37,10 +41,33 @@ function save() {
   }
 }
 
+/**
+ * Written behind, at most twice a second: during an importer's batch the
+ * state changes several times a second, and each save is a few hundred KB.
+ * Leaving the page writes whatever is pending.
+ */
+function save() {
+  saving ??= setTimeout(write, 500);
+}
+if (typeof window !== "undefined") window.addEventListener("pagehide", () => saving && write());
+
+/** Older demo versions' saved state, which this version can't read. */
+function dropOldVersions() {
+  try {
+    for (let v = 1; v < DEMO_VERSION; v++) localStorage.removeItem(`label-check-demo-v${v}`);
+  } catch {
+    // Nothing to tidy.
+  }
+}
+
 const emit = () => listeners.forEach((l) => l());
 
 function getState(): DemoState {
-  return (state ??= load());
+  if (!state) {
+    dropOldVersions();
+    state = load();
+  }
+  return state;
 }
 
 function subscribe(listener: () => void) {

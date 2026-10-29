@@ -1,18 +1,24 @@
 "use client";
 
-import { useNow } from "@/lib/client/now";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { dispatch, useDemo } from "@/lib/client/demo";
+import { useNow } from "@/lib/client/now";
 import { requestPrecheck, usePrechecks, type PrecheckState } from "@/lib/client/precheck";
 import { ago, daysWaiting, minutes, nameOf } from "@/lib/demo/describe";
-import { agentWeek, WAIT_TARGET_DAYS } from "@/lib/demo/metrics";
+import { agentWeek, startOfDay, WAIT_TARGET_DAYS } from "@/lib/demo/metrics";
 import { assignable, can, me } from "@/lib/demo/store";
 import { isOpen, type AppStatus, type DemoApplication, type Precheck } from "@/lib/demo/types";
 import { BEVERAGES, firstName, ROLES } from "@/lib/demo/users";
 import { PrecheckMark, StatusPill } from "./Workflow";
 
 type Group = "open" | "waiting" | "finished";
+
+/** How many of the oldest open applications to have fully checked before they're opened. */
+const PREFETCH = 3;
+const PAGE = 50;
+/** An application this recent gets a "New" tag. */
+const NEW_MS = 2 * 60_000;
 
 const GROUPS: { id: Group; label: string; detail: string; has: (s: AppStatus) => boolean }[] = [
   { id: "open", label: "To work on", detail: "Received or in review", has: isOpen },
@@ -41,6 +47,7 @@ export function Queue() {
   const s = useDemo();
   const prechecks = usePrechecks();
   const [group, setGroup] = useState<Group>("open");
+  const [limit, setLimit] = useState(PAGE);
   const user = me(s);
   const team = can(s, user.id, "queue.team");
   const own = can(s, user.id, "queue.own");
@@ -49,12 +56,17 @@ export function Queue() {
   const visible = s.applications.filter((a) => team || a.assignee === user.id);
   const open = visible.filter((a) => isOpen(a.status));
 
-  // Pre-check what's waiting, oldest first, so the result is ready when it's opened.
-  const openIds = open.map((a) => a.id).join();
+  // The automatic check's verdict is stored, but not the full result (it holds the label's text).
+  // Fetch that for the next few this person is likely to open, so opening them is instant.
+  const next = open
+    .filter((a) => team || a.assignee === user.id)
+    .sort((a, b) => a.receivedAt - b.receivedAt)
+    .slice(0, PREFETCH);
+  const nextIds = next.map((a) => a.id).join();
   useEffect(() => {
-    [...open].sort((a, b) => a.receivedAt - b.receivedAt).forEach((a) => requestPrecheck(a));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the open set changes
-  }, [openIds]);
+    next.forEach((a) => requestPrecheck(a));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only when the next few change
+  }, [nextIds]);
 
   if (!own && !team) {
     return (
@@ -86,6 +98,7 @@ export function Queue() {
     .filter((a) => current.has(a.status))
     .sort((a, b) => (group === "open" ? a.receivedAt - b.receivedAt : b.receivedAt - a.receivedAt));
   const agents = assignable(s);
+  const today = s.days.find((d) => d.day === startOfDay(now));
   // A finished application's pre-check is in its decision; only open ones are re-checked.
   const recorded = new Map<string, Precheck | null>();
   for (const e of s.events) if (e.type === "decided") recorded.set(e.appId, e.precheck);
@@ -110,6 +123,18 @@ export function Queue() {
                   week.medianMs !== null ? `, ${minutes(week.medianMs)} per application at the median` : ""
                 }.`
               : "You haven't finished any applications in the last 7 days."}
+          </p>
+        )}
+        {today && (
+          <p className="mt-3 max-w-3xl rounded-md bg-pass-soft px-4 py-2.5 text-ink">
+            The automatic checks have cleared{" "}
+            <strong className="font-semibold">{today.cleared.toLocaleString()} applications</strong> today
+            with nothing wrong, so nobody needs to look at them. Everything here is something they flagged.{" "}
+            {can(s, user.id, "automation.view") && (
+              <Link href="/automation" className="font-semibold text-blue underline underline-offset-2">
+                See the automatic checks
+              </Link>
+            )}
           </p>
         )}
       </div>
@@ -140,7 +165,7 @@ export function Queue() {
         <>
           {/* A phone gets cards: a wide table that scrolls sideways is easy to lose your place in. */}
           <ul className="space-y-3 md:hidden">
-            {rows.map((a) => (
+            {rows.slice(0, limit).map((a) => (
               <Card
                 key={a.id}
                 app={a}
@@ -167,14 +192,14 @@ export function Queue() {
                   <th className="px-4 py-3 font-semibold">Received</th>
                   {team && <th className="px-4 py-3 font-semibold">Assigned to</th>}
                   <th className="px-4 py-3 font-semibold">Status</th>
-                  <th className="px-4 py-3 font-semibold">Pre-check</th>
+                  <th className="px-4 py-3 font-semibold">Check found</th>
                   <th className="px-4 py-3">
                     <span className="sr-only">Open</span>
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line-soft">
-                {rows.map((a) => (
+                {rows.slice(0, limit).map((a) => (
                   <Row
                     key={a.id}
                     app={a}
@@ -189,6 +214,15 @@ export function Queue() {
               </tbody>
             </table>
           </div>
+          {rows.length > limit && (
+            <button
+              type="button"
+              onClick={() => setLimit((n) => n + PAGE)}
+              className="rounded-md border-2 border-blue bg-white px-4 py-2 font-semibold text-blue hover:bg-blue-soft"
+            >
+              Show {Math.min(PAGE, rows.length - limit)} more
+            </button>
+          )}
         </>
       ) : (
         <p className="rounded-lg bg-white p-6 text-lg text-muted ring-1 ring-line-soft">
@@ -252,6 +286,7 @@ function Card({ app, now, team, agents, assignee, precheck, recorded }: RowProps
         </Link>
         <StatusPill status={app.status} />
       </div>
+      <Why app={app} now={now} />
       <p className="text-muted">
         {BEVERAGES[app.beverage]} from {app.applicant}. <span className="tabular-nums">{app.ttbId}</span>
       </p>
@@ -263,9 +298,12 @@ function Card({ app, now, team, agents, assignee, precheck, recorded }: RowProps
           </dd>
         </div>
         <div>
-          <dt className="text-sm text-muted">Pre-check</dt>
+          <dt className="text-sm text-muted">Check found</dt>
           <dd>
-            <PrecheckMark value={precheck} recorded={isOpen(app.status) ? undefined : recorded} />
+            <PrecheckMark
+              value={precheck}
+              recorded={isOpen(app.status) ? app.verdict : (recorded ?? app.verdict)}
+            />
           </dd>
         </div>
         {team && (
@@ -288,6 +326,20 @@ function Card({ app, now, team, agents, assignee, precheck, recorded }: RowProps
   );
 }
 
+/** Why the automatic check sent it to a person, with a tag while it's brand new. */
+function Why({ app, now }: Pick<RowProps, "app" | "now">) {
+  return (
+    <>
+      {now - app.receivedAt < NEW_MS && (
+        <span className="ml-2 rounded-full bg-navy px-2 py-0.5 align-middle text-xs font-bold text-white">
+          New
+        </span>
+      )}
+      {app.why && <span className="mt-0.5 block max-w-sm text-sm text-muted line-clamp-2">{app.why}</span>}
+    </>
+  );
+}
+
 function Row({ app, now, team, agents, assignee, precheck, recorded }: RowProps) {
   const href = `/review?id=${app.id}`;
   return (
@@ -296,6 +348,7 @@ function Row({ app, now, team, agents, assignee, precheck, recorded }: RowProps)
         <Link href={href} className="font-serif text-lg font-semibold text-blue underline underline-offset-2">
           {app.brand}
         </Link>
+        <Why app={app} now={now} />
       </td>
       <td className="px-4 py-3 whitespace-nowrap tabular-nums text-muted">{app.ttbId}</td>
       <td className="px-4 py-3">{BEVERAGES[app.beverage]}</td>
@@ -312,7 +365,10 @@ function Row({ app, now, team, agents, assignee, precheck, recorded }: RowProps)
         <StatusPill status={app.status} />
       </td>
       <td className="px-4 py-3">
-        <PrecheckMark value={precheck} recorded={isOpen(app.status) ? undefined : recorded} />
+        <PrecheckMark
+          value={precheck}
+          recorded={isOpen(app.status) ? app.verdict : (recorded ?? app.verdict)}
+        />
       </td>
       <td className="px-4 py-3 text-right">
         <Link

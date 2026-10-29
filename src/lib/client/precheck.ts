@@ -29,6 +29,11 @@ function set(id: string, value: PrecheckState) {
   listeners.forEach((l) => l());
 }
 
+/** Stores a result checked elsewhere (the automatic checks), so it isn't read again. */
+export function primePrecheck(id: string, value: PrecheckState) {
+  set(id, value);
+}
+
 /** Queues a check unless one is done or under way; `urgent` puts it at the front. */
 export function requestPrecheck(app: DemoApplication, urgent = false) {
   const now = results.get(app.id);

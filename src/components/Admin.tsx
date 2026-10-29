@@ -34,6 +34,7 @@ export function Admin() {
         </p>
       </div>
       {can(s, user.id, "system.health") && <SystemHealth state={s} />}
+      {isAdmin && <AutomationSettings state={s} />}
       {isAdmin && <Users state={s} />}
       {isAdmin && <Roles state={s} />}
       {isAdmin && (
@@ -93,6 +94,78 @@ function SystemHealth({ state: s }: { state: DemoState }) {
         browser are added as they happen. In production these come from OpenTelemetry into Azure Monitor, with
         an alert when the 95th percentile goes over 5 seconds.
       </p>
+    </section>
+  );
+}
+
+function AutomationSettings({ state: s }: { state: DemoState }) {
+  const id = useId();
+  const a = s.automation;
+  return (
+    <section aria-labelledby={`${id}-auto`} className="space-y-4">
+      <div>
+        <h2 id={`${id}-auto`} className="text-2xl font-bold">
+          Automatic checks
+        </h2>
+        <p className="max-w-3xl text-muted">
+          A label clears without a person only when every field matches the application, the government
+          warning is word for word with a bold heading, and the image reads clearly. Anything else, or any
+          doubt, goes to an agent. Nothing is ever sent back or rejected automatically.
+        </p>
+      </div>
+      <div className="space-y-4 rounded-lg bg-white p-5 shadow-sm ring-1 ring-line-soft">
+        <label className="flex cursor-pointer items-start gap-3 text-lg">
+          <input
+            type="checkbox"
+            checked={a.running}
+            onChange={() => dispatch({ type: "set-automation", running: !a.running })}
+            className="mt-1 size-5 accent-blue"
+          />
+          <span>
+            <span className="block font-semibold">Run the automatic checks</span>
+            <span className="block text-base text-muted">
+              Paused, new applications wait until they resume.
+            </span>
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-3 text-lg">
+          <input
+            type="checkbox"
+            checked={a.autoClear}
+            onChange={() => dispatch({ type: "set-automation", autoClear: !a.autoClear })}
+            className="mt-1 size-5 accent-blue"
+          />
+          <span>
+            <span className="block font-semibold">Clear clean matches without a person</span>
+            <span className="block text-base text-muted">
+              Off, every application goes to an agent, with the check&apos;s result waiting for them.
+            </span>
+          </span>
+        </label>
+        <div>
+          <label htmlFor={`${id}-sample`} className="block text-lg font-semibold">
+            Spot checks
+          </label>
+          <p id={`${id}-sample-hint`} className="text-muted">
+            How many automatic clearances go to a person anyway, to catch the checks being wrong.
+          </p>
+          <select
+            id={`${id}-sample`}
+            aria-describedby={`${id}-sample-hint`}
+            value={a.sampleEvery}
+            disabled={!a.autoClear}
+            onChange={(e) => dispatch({ type: "set-automation", sampleEvery: Number(e.target.value) })}
+            className="mt-1 rounded-md border-2 border-line bg-white px-3 py-2 focus:border-blue disabled:bg-page"
+          >
+            <option value={0}>None</option>
+            {[50, 20, 10].map((n) => (
+              <option key={n} value={n}>
+                1 in {n}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
     </section>
   );
 }

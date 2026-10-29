@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { checkLabel, CheckError } from "@/lib/client/api";
+import { download } from "@/lib/client/download";
 import { sha256 } from "@/lib/client/files";
 import { isImageFile } from "@/lib/client/image";
 import { readerCount } from "@/lib/client/ocr";
@@ -43,13 +44,6 @@ type Filter = "all" | "fail" | "review" | "pass" | "error" | "missing";
 const SEVERITY: Record<string, number> = { fail: 0, error: 1, missing: 2, review: 3, pass: 4, pending: 5 };
 const severity = (it: Item) =>
   SEVERITY[it.result?.verdict ?? (it.state === "error" || it.state === "missing" ? it.state : "pending")];
-
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" }));
-  const a = Object.assign(document.createElement("a"), { href: url, download: name });
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 function duration(ms: number): string {
   const s = Math.round(ms / 1000);

@@ -1,9 +1,9 @@
 "use client";
 
-import { useNow } from "@/lib/client/now";
 import Link from "next/link";
 import { useState } from "react";
 import { currentDemo, dispatch, useDemo } from "@/lib/client/demo";
+import { useNow } from "@/lib/client/now";
 import { daysWaiting, minutes, nameOf, when } from "@/lib/demo/describe";
 import {
   agentWeek,
@@ -17,7 +17,7 @@ import { assignable } from "@/lib/demo/store";
 import type { DemoState } from "@/lib/demo/types";
 import { BEVERAGES } from "@/lib/demo/users";
 import { ActivityFeed } from "./ActivityFeed";
-import { FinishedChart } from "./FinishedChart";
+import { ColumnChart } from "./ColumnChart";
 
 /** "2 to Jenny Park, 1 to Janet" from the assignments the last action made. */
 function summarize(s: DemoState, since: number): string {
@@ -38,25 +38,19 @@ export function Team() {
   const most = Math.max(1, ...weeks.map((w) => w.week.finished));
   const days = finishedPerDay(s, now).map((d) => ({
     day: d.day,
-    total: Object.values(d.by).reduce((a, b) => a + b, 0),
-    parts: people.map((u) => ({ name: u.name, n: d.by[u.id] ?? 0 })).filter((p) => p.n > 0),
+    values: { finished: Object.values(d.by).reduce((a, b) => a + b, 0) },
+    details: people.map((u) => ({ name: u.name, n: d.by[u.id] ?? 0 })).filter((p) => p.n > 0),
   }));
   const spot = overrides(s, now);
   const unassigned = s.applications.filter(
     (a) => !a.assignee && (a.status === "received" || a.status === "in-review"),
   );
 
-  function act(type: "balance" | "arrive") {
+  function rebalance() {
     const since = s.nextEventId;
-    dispatch(type === "balance" ? { type } : { type, count: 5 });
+    dispatch({ type: "balance" });
     const moved = summarize(currentDemo(), since);
-    setMessage(
-      type === "arrive"
-        ? `5 new applications, assigned automatically: ${moved}.`
-        : moved
-          ? `Balanced: ${moved}.`
-          : "The queues are already balanced.",
-    );
+    setMessage(moved ? `Balanced: ${moved}.` : "The queues are already balanced.");
   }
 
   return (
@@ -76,26 +70,17 @@ export function Team() {
               Workload
             </h2>
             <p className="text-muted">
-              New applications go to the agent with the least open work, preferring one who specializes in
-              that type. Reassign any of them from the team queue.
+              Anything the automatic checks flag goes to the agent with the least open work, preferring one
+              who specializes in that type. Reassign any of them from the team queue.
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={() => act("balance")}
-              className="rounded-md bg-blue px-5 py-2.5 text-lg font-semibold text-white hover:bg-blue-dark"
-            >
-              Balance the queues
-            </button>
-            <button
-              type="button"
-              onClick={() => act("arrive")}
-              className="rounded-md border-2 border-blue bg-white px-5 py-2.5 text-lg font-semibold text-blue hover:bg-blue-soft"
-            >
-              Simulate 5 new applications
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={rebalance}
+            className="rounded-md bg-blue px-5 py-2.5 text-lg font-semibold text-white hover:bg-blue-dark"
+          >
+            Balance the queues
+          </button>
         </div>
         <p aria-live="polite" className="min-h-7 font-semibold">
           {message}
@@ -164,7 +149,11 @@ export function Team() {
           </p>
         </div>
         <div className="rounded-lg bg-white p-4 shadow-sm ring-1 ring-line-soft">
-          <FinishedChart days={days} />
+          <ColumnChart
+            columns={days}
+            series={[{ key: "finished", label: "Finished", color: "var(--color-blue)" }]}
+            what="Applications finished"
+          />
         </div>
         <div className="overflow-x-auto rounded-lg bg-white shadow-sm ring-1 ring-line-soft">
           <table className="w-full text-left">

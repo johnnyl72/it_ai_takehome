@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Public_Sans, Source_Serif_4 } from "next/font/google";
 import { Suspense } from "react";
+import { AutomationRunner } from "@/components/AutomationRunner";
 import { ReaderStatus } from "@/components/ReaderStatus";
 import { DemoBanner, SiteHeader, SiteHeaderShell } from "@/components/SiteHeader";
 import "./globals.css";
@@ -27,6 +28,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <Suspense fallback={<SiteHeaderShell />}>
           <SiteHeader />
           <DemoBanner />
+          <AutomationRunner />
         </Suspense>
         <ReaderStatus />
         <main id="main" className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 py-8">

@@ -8,16 +8,27 @@ import { can, homeFor, me } from "@/lib/demo/store";
 import type { DemoState } from "@/lib/demo/types";
 import { ROLES, type DemoUser, type Permission } from "@/lib/demo/users";
 
-const TABS: { href: string; label: (s: DemoState) => string; needs: Permission[] }[] = [
+const TABS: {
+  href: (s: DemoState) => string;
+  label: (s: DemoState) => string;
+  needs: Permission[];
+  also?: string[];
+}[] = [
   {
-    href: "/",
+    href: () => "/",
     label: (s) => (can(s, s.currentUser, "queue.team") ? "Team queue" : "My queue"),
     needs: ["queue.own", "queue.team"],
+    also: ["/review"],
   },
-  { href: "/team", label: () => "Team", needs: ["team.monitor"] },
-  { href: "/check", label: () => "Check a label", needs: ["check.single"] },
-  { href: "/batch", label: () => "Check a batch", needs: ["check.batch"] },
-  { href: "/admin", label: () => "Admin", needs: ["admin", "system.health"] },
+  { href: () => "/team", label: () => "Team", needs: ["team.monitor"] },
+  { href: () => "/automation", label: () => "Automatic checks", needs: ["automation.view"] },
+  {
+    href: (s) => (can(s, s.currentUser, "check.single") ? "/check" : "/batch"),
+    label: () => "Your own labels",
+    needs: ["check.single", "check.batch"],
+    also: ["/check", "/batch"],
+  },
+  { href: () => "/admin", label: () => "Admin", needs: ["admin", "system.health"] },
 ];
 
 const initials = (u: DemoUser) =>
@@ -68,7 +79,7 @@ export function SiteHeader() {
   const path = usePathname();
   const user = me(s);
   const tabs = TABS.filter((t) => t.needs.some((p) => can(s, user.id, p)));
-  const isActive = (href: string) => path === href || (href === "/" && path === "/review");
+  const isActive = (t: (typeof TABS)[number]) => path === t.href(s) || !!t.also?.includes(path);
 
   return (
     <Shell
@@ -76,12 +87,12 @@ export function SiteHeader() {
       tabs={
         <ul className="flex flex-wrap gap-1">
           {tabs.map((t) => (
-            <li key={t.href}>
+            <li key={t.label(s)}>
               <Link
-                href={t.href}
-                aria-current={isActive(t.href) ? "page" : undefined}
+                href={t.href(s)}
+                aria-current={isActive(t) ? "page" : undefined}
                 className={`block rounded-t-md px-3 py-3 font-semibold whitespace-nowrap sm:px-5 sm:text-lg ${
-                  isActive(t.href) ? "bg-page text-navy" : "text-white hover:bg-white/10"
+                  isActive(t) ? "bg-page text-navy" : "text-white hover:bg-white/10"
                 }`}
               >
                 {t.label(s)}
