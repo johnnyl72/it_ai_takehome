@@ -1,13 +1,14 @@
 "use client";
 
-import { useNow } from "@/lib/client/now";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { dispatch, useDemo } from "@/lib/client/demo";
+import { useNow } from "@/lib/client/now";
 import { precheckOf, requestPrecheck, usePrechecks, type PrecheckState } from "@/lib/client/precheck";
 import { ago, describe, nameOf, when } from "@/lib/demo/describe";
-import { workTimes } from "@/lib/demo/metrics";
+import { agentWeek, workTimes } from "@/lib/demo/metrics";
+import { issues } from "@/lib/demo/reasons";
 import { kitEntry } from "@/lib/demo/seed";
 import { blocked, can, canView, me, needsReason } from "@/lib/demo/store";
 import {
@@ -34,26 +35,22 @@ const CHOICES: { id: Decision; label: string; detail: string }[] = [
 function suggestedReason(p: PrecheckState | undefined): string {
   if (p?.state === "error" && !p.retry)
     return "Send a clearer image of the label, at least 1500 pixels on its long side.";
-  if (p?.state !== "done") return "";
-  return p.result.checks
-    .filter((c) => c.status === "fail" || c.status === "review")
-    .map((c) =>
-      c.details
-        ? `${c.label}: ${c.details
-            .filter((d) => d.status !== "pass")
-            .map((d) => d.text)
-            .join(" ")}`
-        : `${c.label}: ${c.note}`,
-    )
-    .join("\n");
+  return p?.state === "done" ? issues(p.result).join("\n") : "";
 }
 
-/** The open application to go to next: this person's oldest, after this one. */
-function nextFor(s: DemoState, after: string): DemoApplication | undefined {
+/** This person's open work in queue order (oldest first), the list Previous and Next move through. */
+function workList(s: DemoState): DemoApplication[] {
   const team = can(s, s.currentUser, "queue.team");
   return s.applications
-    .filter((a) => a.id !== after && isOpen(a.status) && (team || a.assignee === s.currentUser))
-    .sort((a, b) => a.receivedAt - b.receivedAt)[0];
+    .filter((a) => isOpen(a.status) && (team || a.assignee === s.currentUser))
+    .sort((a, b) => a.receivedAt - b.receivedAt);
+}
+
+/** The next one to work on after this one; the oldest if this one isn't in the list. */
+function nextFor(s: DemoState, after: string): DemoApplication | undefined {
+  const list = workList(s).filter((a) => a.id !== after);
+  const at = s.applications.find((a) => a.id === after)?.receivedAt ?? 0;
+  return list.find((a) => a.receivedAt > at) ?? list[0];
 }
 
 export function ApplicationReview() {
@@ -64,17 +61,23 @@ export function ApplicationReview() {
   const app = s.applications.find((a) => a.id === id);
   const allowed = !!app && canView(s, user.id, app);
   const opened = useRef<string | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   const now = useNow();
+  const next = app ? nextFor(s, app.id) : undefined;
 
   useEffect(() => {
     if (!app || !allowed) return;
     requestPrecheck(app, true);
+    // The one after this is checked in the background, so moving on is instant.
+    if (next) requestPrecheck(next);
     // Opening is an audit event, logged once per visit (not again on every re-render).
     if (opened.current !== app.id) {
       opened.current = app.id;
       dispatch({ type: "open", appId: app.id });
+      heading.current?.focus({ preventScroll: true });
     }
-  }, [app, allowed]);
+  }, [app, allowed, next]);
 
   const back = can(s, user.id, "queue.team") ? "Back to the team queue" : "Back to my queue";
   if (!app)
@@ -96,12 +99,16 @@ export function ApplicationReview() {
 
   return (
     <div className="space-y-6">
-      <Link href="/" className="text-lg text-blue underline underline-offset-2">
-        {back}
-      </Link>
+      <WorkBar state={s} app={app} now={now} back={back} flash={flash} onMove={() => setFlash(null)} />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="font-serif text-3xl font-bold text-navy sm:text-4xl">{app.brand}</h1>
+          <h1
+            ref={heading}
+            tabIndex={-1}
+            className="font-serif text-3xl font-bold text-navy outline-none sm:text-4xl"
+          >
+            {app.brand}
+          </h1>
           <p className="mt-1 text-lg text-muted">
             TTB ID <span className="tabular-nums">{app.ttbId}</span>. {BEVERAGES[app.beverage]} from{" "}
             {app.applicant}. Received {ago(app.receivedAt, now).toLowerCase()}, assigned to{" "}
@@ -128,8 +135,21 @@ export function ApplicationReview() {
         </div>
 
         <div className="space-y-6">
+          {app.why && (
+            <p
+              role="note"
+              className={`rounded-md border-l-8 p-4 text-lg ${app.spotCheck ? "border-blue bg-blue-soft" : "border-review bg-review-soft"}`}
+            >
+              <strong className="font-semibold">
+                {app.spotCheck ? "Why you're seeing this:" : "Flagged by the automatic check:"}
+              </strong>{" "}
+              {app.spotCheck
+                ? "it cleared automatically, and a sample of clearances is checked by a person."
+                : app.why}
+            </p>
+          )}
           <Check value={p} showText={can(s, user.id, "ocr.text")} />
-          <DecisionPanel key={app.id} state={s} app={app} precheck={p} />
+          <DecisionPanel key={app.id} state={s} app={app} precheck={p} next={next} onRecorded={setFlash} />
 
           <details className="rounded-lg bg-white p-5 ring-1 ring-line-soft">
             <summary className="cursor-pointer text-lg font-semibold">What the application says</summary>
@@ -176,6 +196,73 @@ export function ApplicationReview() {
   );
 }
 
+/**
+ * Stays at the top while an agent works through their queue: where they are,
+ * how the day is going, and a way to move on without going back to the list.
+ */
+function WorkBar({
+  state: s,
+  app,
+  now,
+  back,
+  flash,
+  onMove,
+}: {
+  state: DemoState;
+  app: DemoApplication;
+  now: number;
+  back: string;
+  flash: string | null;
+  onMove: () => void;
+}) {
+  const list = workList(s);
+  const i = list.findIndex((a) => a.id === app.id);
+  const prev = i > 0 ? list[i - 1] : undefined;
+  const next = nextFor(s, app.id);
+  const done = agentWeek(s, s.currentUser, now).finishedToday;
+  const button =
+    "rounded-md border-2 px-4 py-2 font-semibold whitespace-nowrap aria-disabled:pointer-events-none aria-disabled:opacity-40";
+  return (
+    <div className="sticky top-0 z-10 -mx-4 border-b border-line bg-page/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <Link href="/" className="text-blue underline underline-offset-2">
+          {back}
+        </Link>
+        <p className="text-lg">
+          <strong className="font-semibold tabular-nums">
+            {i >= 0 ? `${i + 1} of ${list.length}` : `${list.length} left`}
+          </strong>{" "}
+          to work on
+          <span className="text-muted"> · {done} finished today</span>
+        </p>
+        <div className="ml-auto flex gap-2">
+          <Link
+            href={prev ? `/review?id=${prev.id}` : "#"}
+            aria-disabled={!prev}
+            onClick={onMove}
+            className={`${button} border-blue bg-white text-blue hover:bg-blue-soft`}
+          >
+            Previous
+          </Link>
+          <Link
+            href={next ? `/review?id=${next.id}` : "#"}
+            aria-disabled={!next}
+            onClick={onMove}
+            className={`${button} border-blue bg-blue text-white hover:bg-blue-dark`}
+          >
+            {next ? "Next" : "No more"}
+          </Link>
+        </div>
+      </div>
+      {flash && (
+        <p role="status" className="mt-2 font-semibold text-pass">
+          {flash}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function Check({ value, showText }: { value: PrecheckState | undefined; showText: boolean }) {
   if (value?.state === "done") return <ResultView result={value.result} showReadText={showText} />;
   if (value?.state === "error")
@@ -195,11 +282,16 @@ function DecisionPanel({
   state: s,
   app,
   precheck,
+  next,
+  onRecorded,
 }: {
   state: DemoState;
   app: DemoApplication;
   precheck: PrecheckState | undefined;
+  next: DemoApplication | undefined;
+  onRecorded: (message: string) => void;
 }) {
+  const router = useRouter();
   const [choice, setChoice] = useState<Decision | null>(null);
   const [reason, setReason] = useState("");
   const [suggested, setSuggested] = useState("");
@@ -209,14 +301,13 @@ function DecisionPanel({
   const confirm = useRef<HTMLDivElement>(null);
   const user = me(s);
   const now = useNow();
-  const verdict = precheckOf(precheck);
+  const verdict = precheckOf(precheck) ?? app.verdict;
 
   useEffect(() => {
     if (recorded) confirm.current?.focus();
   }, [recorded]);
 
   if (recorded) {
-    const next = nextFor(s, app.id);
     return (
       <div
         ref={confirm}
@@ -291,7 +382,11 @@ function DecisionPanel({
     const why = blocked(s, action);
     if (why) return setError(why);
     dispatch(action);
-    setRecorded(choice);
+    // Straight on to the next one, with a line saying what was recorded.
+    if (next) {
+      onRecorded(`Recorded ${app.brand}: ${STATUS_LABEL[choice]}. This is the next one.`);
+      router.push(`/review?id=${next.id}`);
+    } else setRecorded(choice);
   }
 
   return (
@@ -355,7 +450,7 @@ function DecisionPanel({
         type="submit"
         className="w-full rounded-md bg-blue px-6 py-4 text-xl font-bold text-white hover:bg-blue-dark"
       >
-        Record decision
+        {next ? "Record and open the next one" : "Record decision"}
       </button>
     </form>
   );
